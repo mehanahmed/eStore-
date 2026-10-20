@@ -7,3 +7,6 @@ uploads/
 .DS_Store
 ~$*
 .next/
+
+# Local-only seed scripts (never commit to git/production)
+scripts/

@@ -311,22 +311,43 @@ const ProductCard = React.forwardRef<HTMLAnchorElement, { p: Product, idx: numbe
                         <span style={{ color: '#595959' }}>({((idx + 1) * 342) % 3000})</span>
                     </div>
                 </div>
-                {displayNames.length > 0 ? (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        {displayNames.map((name, i) => {
-                            const style = getCategoryStyles(name);
-                            return (
-                                <div key={i} className="store-category-badge" style={{ backgroundColor: style.bg, color: style.text, fontSize: '9px', padding: '3px 8px' }}>
-                                    {name}
-                                </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <div className="store-category-badge" style={{ backgroundColor: catStyle.bg, color: catStyle.text }}>
-                        {catName}
-                    </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '4px' }}>
+                    {displayNames.length > 0 ? (
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {displayNames.map((name, i) => {
+                                const style = getCategoryStyles(name);
+                                return (
+                                    <div key={i} className="store-category-badge" style={{ backgroundColor: style.bg, color: style.text, fontSize: '9px', padding: '3px 8px' }}>
+                                        {name}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="store-category-badge" style={{ backgroundColor: catStyle.bg, color: catStyle.text }}>
+                            {catName}
+                        </div>
+                    )}
+
+                    {Boolean(p.price && Number(p.price) > 0) && (
+                        <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'baseline',
+                            fontWeight: 900,
+                            color: '#0f172a',
+                            fontSize: '13.5px',
+                            letterSpacing: '-0.02em',
+                            background: '#fff7ed',
+                            border: '1px solid #fed7aa',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            whiteSpace: 'nowrap'
+                        }}>
+                            <span style={{ color: '#ea580c', fontSize: '12px', marginRight: '1.5px', fontWeight: 900 }}>৳</span>
+                            <span>{Number(p.price).toLocaleString()}</span>
+                        </div>
+                    )}
+                </div>
             </div>
         </a>
     );

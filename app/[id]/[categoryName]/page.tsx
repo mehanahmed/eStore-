@@ -6,6 +6,14 @@ import { motion, AnimatePresence } from 'framer-motion';
 import HeroSlider from '../../HeroSlider';
 
 // === ICONS ===
+
+const PlayCircleIcon = () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polygon points="10 8 16 12 10 16 10 8"></polygon>
+    </svg>
+);
+
 const YouTubeIcon = () => (
     <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" stroke="none">
         <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
@@ -294,22 +302,43 @@ const ProductCard = React.forwardRef<HTMLAnchorElement, { p: Product, idx: numbe
                         <span style={{ color: '#595959' }}>({((idx + 1) * 342) % 3000})</span>
                     </div>
                 </div>
-                {displayNames.length > 0 ? (
-                    <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                        {displayNames.map((name, i) => {
-                            const style = getCategoryStyles(name);
-                            return (
-                                <div key={i} className="store-category-badge" style={{ backgroundColor: style.bg, color: style.text, fontSize: '9px', padding: '3px 8px' }}>
-                                    {name}
-                                </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <div className="store-category-badge" style={{ backgroundColor: catStyle.bg, color: catStyle.text }}>
-                        {catName}
-                    </div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '4px' }}>
+                    {displayNames.length > 0 ? (
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {displayNames.map((name, i) => {
+                                const style = getCategoryStyles(name);
+                                return (
+                                    <div key={i} className="store-category-badge" style={{ backgroundColor: style.bg, color: style.text, fontSize: '9px', padding: '3px 8px' }}>
+                                        {name}
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    ) : (
+                        <div className="store-category-badge" style={{ backgroundColor: catStyle.bg, color: catStyle.text }}>
+                            {catName}
+                        </div>
+                    )}
+
+                    {Boolean(p.price && Number(p.price) > 0) && (
+                        <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'baseline',
+                            fontWeight: 900,
+                            color: '#0f172a',
+                            fontSize: '13.5px',
+                            letterSpacing: '-0.02em',
+                            background: '#fff7ed',
+                            border: '1px solid #fed7aa',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            whiteSpace: 'nowrap'
+                        }}>
+                            <span style={{ color: '#ea580c', fontSize: '12px', marginRight: '1.5px', fontWeight: 900 }}>৳</span>
+                            <span>{Number(p.price).toLocaleString()}</span>
+                        </div>
+                    )}
+                </div>
             </div>
         </a>
     );
@@ -1616,9 +1645,9 @@ export default function CategoryPage() {
                     </div>
 
                     <div className="store-header-nav">
-                        <button className="store-icon-btn" title="Account">
+                        <a href="/login" className="store-icon-btn" title="Account" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', color: 'inherit' }}>
                             <UserIcon />
-                        </button>
+                        </a>
 
                         <button className="store-icon-btn desktop-only" title="Favorites">
                             <HeartIcon />
@@ -1635,15 +1664,16 @@ export default function CategoryPage() {
                 </div>
 
                 <nav className="store-subnav" ref={subNavRef as any}>
-                    <a href="/all" className="store-subnav-item"><GridIcon /> All Products</a>
-                    {categories
-                        .filter(cat => !cat.parent_id && !cat.parent_ids)
-                        .map((cat) => (
-                            <a key={cat.id} href={`/${cat.id}/${cat.slug}/`} className="store-subnav-item">
-                                {cat.name}
-                            </a>
-                        ))}
-                    <a href="/demo" className="store-subnav-item"><VideoIcon /> Demo</a>
+                    <a href="/all/" className="store-subnav-item"><GridIcon /> All Products</a>
+                    <a href="/restaurant/" className="store-subnav-item">Restaurant</a>
+                    <a href="/parlour/" className="store-subnav-item">Parlour</a>
+                    <a href="/interior/" className="store-subnav-item">Interior</a>
+                    <a href="/exterior/" className="store-subnav-item">Exterior</a>
+                    <a href="/management/" className="store-subnav-item">Management</a>
+                    <a href="/demo/" className="store-subnav-item">
+                        <PlayCircleIcon />
+                        Demo
+                    </a>
                 </nav>
             </header>
 

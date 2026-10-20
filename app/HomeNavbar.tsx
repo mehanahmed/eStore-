@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
+import { usePathname } from 'next/navigation';
 
 // === ICONS ===
 const SearchIcon = () => (
@@ -62,6 +63,17 @@ const PlayCircleIcon = () => (
     </svg>
 );
 
+// === SUB NAV (hardcoded) ===
+const SUB_NAV = [
+    { label: 'All Products', href: '/all/', icon: 'grid' as const },
+    { label: 'Restaurant', href: '/restaurant/', icon: null },
+    { label: 'Parlour', href: '/parlour/', icon: null },
+    { label: 'Interior', href: '/interior/', icon: null },
+    { label: 'Exterior', href: '/exterior/', icon: null },
+    { label: 'Management', href: '/management/', icon: null },
+    { label: 'Demo', href: '/demo/', icon: 'play' as const },
+];
+
 // ===  PROPS ===
 interface HomeNavbarProps {
     categories: any[];
@@ -82,6 +94,7 @@ export default function HomeNavbar({
     onMobileSheetOpen,
     onMobileSheetClose,
 }: HomeNavbarProps) {
+    const pathname = usePathname();
     const [searchFocused, setSearchFocused] = useState(false);
     const [catMenuOpen, setCatMenuOpen] = useState(false);
     const [suggestions, setSuggestions] = useState<any[]>([]);
@@ -315,7 +328,9 @@ export default function HomeNavbar({
 
                     {/* Header Actions */}
                     <div className="store-header-nav">
-                        <button className="store-icon-btn" title="Account"><UserIcon /></button>
+                        <a href="/login" className="store-icon-btn" title="Account" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', textDecoration: 'none', color: 'inherit' }}>
+                            <UserIcon />
+                        </a>
                         <button className="store-icon-btn desktop-only" title="Favorites"><HeartIcon /></button>
                         <button className="store-icon-btn mobile-only" title="All Categories" onClick={onMobileSheetOpen}>
                             <GridIcon />
@@ -324,20 +339,22 @@ export default function HomeNavbar({
                     </div>
                 </div>
 
-                {/* --- SUBNAV --- */}
+                {/* --- SUBNAV (hardcoded) --- */}
                 <nav className="store-subnav" ref={subNavRef as any}>
-                    <a href="/all" className="store-subnav-item"><GridIcon /> All Products</a>
-                    {categories
-                        .filter(cat => !cat.parent_id && !cat.parent_ids)
-                        .map((cat) => (
-                            <a key={cat.id} href={`/${cat.id}/${cat.slug}/`} className="store-subnav-item">
-                                {cat.name}
+                    {SUB_NAV.map((item) => {
+                        const isActive = pathname === item.href || pathname?.startsWith(item.href.replace(/\/$/, ''));
+                        return (
+                            <a
+                                key={item.href}
+                                href={item.href}
+                                className={`store-subnav-item${isActive ? ' is-active' : ''}`}
+                            >
+                                {item.icon === 'grid' && <GridIcon />}
+                                {item.icon === 'play' && <PlayCircleIcon />}
+                                {item.label}
                             </a>
-                        ))}
-                    <a href="/demo/" className="store-subnav-item">
-                        <PlayCircleIcon />
-                        Demo
-                    </a>
+                        );
+                    })}
                 </nav>
             </header>
 

@@ -736,7 +736,7 @@ function updateMySitemapFile() {
 
 // Authentication middleware
 function requireAuth(req, res, next) {
-    if (req.session && req.session.user && req.session.user.role === 'admin') {
+    if (req.session && req.session.user && req.session.user.role !== 'user') {
         return next();
     }
 
@@ -756,7 +756,7 @@ app.post('/admin/login', (req, res) => {
         return res.status(400).send('Email and password are required');
     }
 
-    const query = 'SELECT * FROM users WHERE email = ? AND role = "admin"';
+    const query = 'SELECT * FROM users WHERE email = ? AND role != "user" AND (status = "Active" OR status IS NULL)';
     db.query(query, [email], async (err, results) => {
         if (err) {
             console.error('Login error:', err);
@@ -786,6 +786,99 @@ app.post('/admin/login', (req, res) => {
 });
 
 // Get admin profile
+
+
+// ── Customers API (eStore Users) ──────────────────────────────────────────
+app.get("/api/admin/customers", requireAuth, (req, res) => {
+    db.query(
+        "SELECT id, name, email, role, status, created_at FROM users WHERE role = 'user' ORDER BY created_at DESC",
+        (err, results) => {
+            if (err) return res.status(500).json({ error: "Failed to fetch customers" });
+            res.json(results || []);
+        }
+    );
+});
+
+// ── Staff Management API (Manage Users with Roles & Access) ───────────────
+app.get("/api/admin/staff", requireAuth, (req, res) => {
+    db.query(
+        "SELECT id, name, email, role, access_permissions, status, created_at FROM users WHERE role != 'user' ORDER BY id ASC",
+        (err, results) => {
+            if (err) return res.status(500).json({ error: "Failed to fetch staff" });
+            const list = (results || []).map(u => {
+                let perms = ["all"];
+                try { if (u.access_permissions) perms = JSON.parse(u.access_permissions); } catch(e){}
+                return { ...u, permissions: perms };
+            });
+            res.json(list);
+        }
+    );
+});
+
+app.post("/api/admin/staff", requireAuth, async (req, res) => {
+    const { name, email, password, role, permissions } = req.body;
+    if (!name || !email || !password) {
+        return res.status(400).json({ error: "Name, email and password are required" });
+    }
+    try {
+        const hashed = await bcrypt.hash(password, saltRounds);
+        const permJson = JSON.stringify(permissions || ["all"]);
+        const staffRole = role || "manager";
+        db.query(
+            "INSERT INTO users (name, email, password, role, access_permissions, status) VALUES (?, ?, ?, ?, ?, 'Active')",
+            [name, email, hashed, staffRole, permJson],
+            (err, result) => {
+                if (err) {
+                    if (err.code === "ER_DUP_ENTRY") return res.status(409).json({ error: "Email already registered" });
+                    return res.status(500).json({ error: "Failed to create staff user" });
+                }
+                res.json({ success: true, id: result.insertId });
+            }
+        );
+    } catch(e) {
+        res.status(500).json({ error: "Server error" });
+    }
+});
+
+app.put("/api/admin/staff/:id", requireAuth, async (req, res) => {
+    const staffId = req.params.id;
+    const { name, email, role, permissions, status, password } = req.body;
+    let query = "UPDATE users SET name = ?, email = ?, role = ?, access_permissions = ?, status = ?";
+    const params = [name, email, role || "manager", JSON.stringify(permissions || ["all"]), status || "Active"];
+
+    if (password && password.trim().length >= 6) {
+        const hashed = await bcrypt.hash(password, saltRounds);
+        query += ", password = ?";
+        params.push(hashed);
+    }
+
+    query += " WHERE id = ? AND role != 'user'";
+    params.push(staffId);
+
+    db.query(query, params, (err) => {
+        if (err) return res.status(500).json({ error: "Failed to update staff user" });
+        res.json({ success: true });
+    });
+});
+
+app.delete("/api/admin/staff/:id", requireAuth, (req, res) => {
+    const staffId = req.params.id;
+    if (String(staffId) === "1") {
+        return res.status(400).json({ error: "Cannot delete the primary root admin" });
+    }
+    db.query("DELETE FROM users WHERE id = ? AND role != 'user'", [staffId], (err) => {
+        if (err) return res.status(500).json({ error: "Failed to delete staff user" });
+        res.json({ success: true });
+    });
+});
+
+app.get("/api/admin/users", requireAuth, (req, res) => {
+    db.query("SELECT id, name, email, role, created_at FROM users ORDER BY created_at DESC", (err, results) => {
+        if (err) return res.status(500).json({ error: "Failed to fetch users" });
+        res.json(results || []);
+    });
+});
+
 app.get('/api/admin/profile', requireAuth, (req, res) => {
     const adminId = req.session.user.id;
     db.query('SELECT id, name, email FROM users WHERE id = ?', [adminId], (err, results) => {
@@ -924,7 +1017,7 @@ app.get('/api/public/products', (req, res) => {
     const pinned = req.query.pinned === 'true';
 
     let query = `
-        SELECT p.id, p.name, p.slug, p.category_id, p.price, p.image, p.video_url, p.rating, p.position, p.is_pinned, (
+        SELECT p.id, p.name, p.slug, p.category_id, p.price, p.allow_buy_now, p.image, p.video_url, p.rating, p.position, p.is_pinned, (
             SELECT GROUP_CONCAT(name SEPARATOR ', ') 
             FROM categories 
             WHERE FIND_IN_SET(id, p.category_id)
@@ -1042,7 +1135,7 @@ app.get('/api/public/related/:categoryId', (req, res) => {
     }
 
     const query = `
-        SELECT p.id, p.name, p.slug, p.image, p.video_url, p.rating, (
+        SELECT p.id, p.name, p.slug, p.price, p.allow_buy_now, p.image, p.video_url, p.rating, (
             SELECT GROUP_CONCAT(name SEPARATOR ', ') 
             FROM categories 
             WHERE FIND_IN_SET(id, p.category_id)
@@ -1055,7 +1148,30 @@ app.get('/api/public/related/:categoryId', (req, res) => {
 
     db.query(query, params, (err, results) => {
         if (err) return res.status(500).json([]);
-        res.json(results);
+        if (results && results.length >= 8) {
+            return res.json(results);
+        }
+
+        const safeResults = results || [];
+        const existingIds = [Number(excludeId) || 0, ...safeResults.map(r => r.id)].filter(id => id > 0);
+        const placeholders = existingIds.length > 0 ? existingIds.map(() => '?').join(',') : '0';
+        const needed = 8 - safeResults.length;
+
+        const fallbackQuery = `
+            SELECT p.id, p.name, p.slug, p.price, p.allow_buy_now, p.image, p.video_url, p.rating, (
+                SELECT GROUP_CONCAT(name SEPARATOR ', ') 
+                FROM categories 
+                WHERE FIND_IN_SET(id, p.category_id)
+            ) as category_name
+            FROM products p
+            WHERE p.id NOT IN (${placeholders}) AND p.status = 'Published' AND p.is_deleted = FALSE 
+            ORDER BY p.position ASC, p.created_at DESC
+            LIMIT ?
+        `;
+        db.query(fallbackQuery, [...existingIds, needed], (fallbackErr, fallbackResults) => {
+            if (fallbackErr || !fallbackResults) return res.json(safeResults);
+            res.json([...safeResults, ...fallbackResults]);
+        });
     });
 });
 
@@ -1317,6 +1433,207 @@ app.post('/api/products/reorder', requireAuth, (req, res) => {
         });
 });
 
+
+// ===== ORDERS API =====
+
+// 1. Public Place Order
+app.post('/api/public/orders', (req, res) => {
+    const {
+        customer_name,
+        customer_phone,
+        customer_email,
+        shipping_address,
+        city = 'Dhaka',
+        delivery_zone = 'inside_dhaka',
+        order_notes,
+        payment_method = 'cod',
+        items
+    } = req.body;
+
+    if (!customer_name || !customer_phone || !shipping_address) {
+        return res.status(400).json({ error: 'Name, phone number, and delivery address are required' });
+    }
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ error: 'Order must contain at least one item' });
+    }
+
+    const subtotal = items.reduce((acc, item) => {
+        const itemPrice = parseFloat(item.price) || 0;
+        const itemQty = parseInt(item.quantity) || 1;
+        return acc + (itemPrice * itemQty);
+    }, 0);
+
+    const shipping_fee = delivery_zone === 'outside_dhaka' ? 130 : 70;
+    const total_amount = subtotal + shipping_fee;
+
+    const now = new Date();
+    const dateStr = now.toISOString().slice(2, 10).replace(/-/g, '');
+    const randPart = Math.floor(1000 + Math.random() * 9000);
+    const order_number = `ORD-${dateStr}-${randPart}`;
+
+    const query = `
+        INSERT INTO orders (
+            order_number,
+            customer_name,
+            customer_phone,
+            customer_email,
+            shipping_address,
+            city,
+            delivery_zone,
+            order_notes,
+            payment_method,
+            payment_status,
+            order_status,
+            subtotal,
+            shipping_fee,
+            total_amount,
+            items_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?)
+    `;
+
+    db.query(query, [
+        order_number,
+        customer_name.trim(),
+        customer_phone.trim(),
+        customer_email ? customer_email.trim() : null,
+        shipping_address.trim(),
+        city,
+        delivery_zone,
+        order_notes ? order_notes.trim() : null,
+        payment_method,
+        subtotal,
+        shipping_fee,
+        total_amount,
+        JSON.stringify(items)
+    ], (err, result) => {
+        if (err) {
+            console.error('Error placing order:', err);
+            return res.status(500).json({ error: 'Failed to place order. Please try again.' });
+        }
+
+        res.json({
+            success: true,
+            orderId: result.insertId,
+            orderNumber: order_number,
+            totalAmount: total_amount,
+            message: 'Order placed successfully!'
+        });
+    });
+});
+
+// 2. Public Get Order by Order Number
+app.get('/api/public/orders/:orderNumber', (req, res) => {
+    const { orderNumber } = req.params;
+    db.query('SELECT * FROM orders WHERE order_number = ?', [orderNumber], (err, results) => {
+        if (err || results.length === 0) {
+            return res.status(404).json({ error: 'Order not found' });
+        }
+        const order = results[0];
+        try {
+            if (typeof order.items_json === 'string') {
+                order.items = JSON.parse(order.items_json);
+            } else {
+                order.items = order.items_json || [];
+            }
+        } catch (e) {
+            order.items = [];
+        }
+        res.json(order);
+    });
+});
+
+// 3. Admin Get Orders List with Stats
+app.get('/api/admin/orders', requireAuth, (req, res) => {
+    const status = req.query.status;
+    const search = req.query.search;
+
+    let whereClause = '1=1';
+    const params = [];
+
+    if (status && status !== 'all') {
+        whereClause += ' AND order_status = ?';
+        params.push(status);
+    }
+
+    if (search) {
+        whereClause += ' AND (order_number LIKE ? OR customer_name LIKE ? OR customer_phone LIKE ?)';
+        params.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    const listQuery = `SELECT * FROM orders WHERE ${whereClause} ORDER BY created_at DESC`;
+    const statsQuery = `
+        SELECT 
+            COUNT(*) as total_count,
+            COALESCE(SUM(CASE WHEN order_status != 'cancelled' THEN total_amount ELSE 0 END), 0) as total_sales,
+            SUM(CASE WHEN order_status = 'pending' THEN 1 ELSE 0 END) as pending_count,
+            SUM(CASE WHEN order_status = 'delivered' THEN 1 ELSE 0 END) as delivered_count
+        FROM orders
+    `;
+
+    db.query(listQuery, params, (err, orders) => {
+        if (err) {
+            console.error('Error fetching admin orders:', err);
+            return res.status(500).json({ error: 'Failed to fetch orders' });
+        }
+
+        db.query(statsQuery, (statsErr, statsResult) => {
+            const stats = (statsResult && statsResult[0]) || {
+                total_count: 0,
+                total_sales: 0,
+                pending_count: 0,
+                delivered_count: 0
+            };
+
+            const parsedOrders = (orders || []).map(o => {
+                let items = [];
+                try {
+                    items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+                } catch (e) {
+                    items = [];
+                }
+                return { ...o, items };
+            });
+
+            res.json({
+                orders: parsedOrders,
+                stats
+            });
+        });
+    });
+});
+
+// 4. Admin Update Order Status
+app.put('/api/admin/orders/:id/status', requireAuth, (req, res) => {
+    const { id } = req.params;
+    const { order_status, payment_status } = req.body;
+
+    const updates = [];
+    const params = [];
+
+    if (order_status) {
+        updates.push('order_status = ?');
+        params.push(order_status);
+    }
+    if (payment_status) {
+        updates.push('payment_status = ?');
+        params.push(payment_status);
+    }
+
+    if (updates.length === 0) {
+        return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    params.push(id);
+    db.query(`UPDATE orders SET ${updates.join(', ')} WHERE id = ?`, params, (err, result) => {
+        if (err) {
+            console.error('Error updating order:', err);
+            return res.status(500).json({ error: 'Failed to update order status' });
+        }
+        res.json({ success: true, message: 'Order status updated' });
+    });
+});
+
 // Get trash items
 app.get('/api/trash', requireAuth, (req, res) => {
     const productsQuery = "SELECT id, name, 'Product' as type, image, deleted_at FROM products WHERE is_deleted = TRUE";
@@ -1503,12 +1820,12 @@ app.post('/api/admin/upload-video', requireAuth, upload.single('video'), async (
 
 // Create product
 app.post('/api/products', requireAuth, (req, res) => {
-    const { name, category_id, description, image, video_url, status, is_pinned, rating, seo_keywords, seo_description, position } = req.body;
+    const { name, category_id, description, image, video_url, status, is_pinned, rating, seo_keywords, seo_description, position, price, allow_buy_now } = req.body;
     const slug = generateSlug(name);
     const catId = category_id === "" ? null : category_id;
 
-    const query = 'INSERT INTO products (name, slug, category_id, description, price, image, video_url, status, is_pinned, rating, seo_keywords, seo_description, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
-    db.query(query, [name, slug, catId, description, 0, image, video_url, status || 'Draft', is_pinned ? 1 : 0, rating || 5.0, seo_keywords, seo_description, position || 0], (err, result) => {
+    const query = 'INSERT INTO products (name, slug, category_id, description, price, allow_buy_now, image, video_url, status, is_pinned, rating, seo_keywords, seo_description, position) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    db.query(query, [name, slug, catId, description, price !== undefined && price !== null && price !== '' ? Number(price) : null, allow_buy_now ? 1 : 0, image, video_url, status || 'Draft', is_pinned ? 1 : 0, rating || 5.0, seo_keywords, seo_description, position || 0], (err, result) => {
         if (err) {
             console.error('Error creating product:', err);
             return res.status(500).json({ error: 'Failed to create product' });
@@ -1521,12 +1838,12 @@ app.post('/api/products', requireAuth, (req, res) => {
 
 // Update product
 app.put('/api/products/:id', requireAuth, (req, res) => {
-    const { name, category_id, description, image, video_url, status, is_pinned, rating, seo_keywords, seo_description, position } = req.body;
+    const { name, category_id, description, image, video_url, status, is_pinned, rating, seo_keywords, seo_description, position, price, allow_buy_now } = req.body;
     const slug = generateSlug(name);
     const catId = category_id === "" ? null : category_id;
 
-    const query = 'UPDATE products SET name = ?, slug = ?, category_id = ?, description = ?, image = ?, video_url = ?, status = ?, is_pinned = ?, rating = ?, seo_keywords = ?, seo_description = ?, position = ? WHERE id = ?';
-    db.query(query, [name, slug, catId, description, image, video_url, status, is_pinned ? 1 : 0, rating, seo_keywords, seo_description, position || 0, req.params.id], (err, result) => {
+    const query = 'UPDATE products SET name = ?, slug = ?, category_id = ?, description = ?, price = ?, allow_buy_now = ?, image = ?, video_url = ?, status = ?, is_pinned = ?, rating = ?, seo_keywords = ?, seo_description = ?, position = ? WHERE id = ?';
+    db.query(query, [name, slug, catId, description, price !== undefined && price !== null && price !== '' ? Number(price) : null, allow_buy_now ? 1 : 0, image, video_url, status, is_pinned ? 1 : 0, rating, seo_keywords, seo_description, position || 0, req.params.id], (err, result) => {
         if (err) {
             console.error('Error updating product:', err);
             return res.status(500).json({ error: 'Failed to update product' });
@@ -1796,6 +2113,15 @@ app.get('/admin/meeting-requests', requireAuth, (req, res) => {
 app.get('/admin/demo', requireAuth, (req, res) => {
     return handle(req, res);
 });
+
+app.get('/admin/customers', requireAuth, (req, res) => { return handle(req, res); });
+app.get('/admin/manage-users', requireAuth, (req, res) => { return handle(req, res); });
+app.get('/admin/users', requireAuth, (req, res) => { return handle(req, res); });
+app.get('/admin/coupons', requireAuth, (req, res) => { return handle(req, res); });
+app.get('/admin/orders', requireAuth, (req, res) => { return handle(req, res); });
+app.get('/admin/payments', requireAuth, (req, res) => { return handle(req, res); });
+app.get('/admin/responses', requireAuth, (req, res) => { return handle(req, res); });
+app.get('/admin/testimonials', requireAuth, (req, res) => { return handle(req, res); });
 
 // Socket.io for real-time updates
 // ===== SETTINGS & TRAFFIC API =====
@@ -2581,6 +2907,52 @@ nextApp.prepare().then(async () => {
 
     // GraphQL middleware applied before Next.js catch-all handler
     app.use('/graphql', expressMiddleware(apolloServer));
+
+
+    // ── User Auth Routes ──────────────────────────────────────────────────────
+    app.post('/api/user/register', async (req, res) => {
+        const { name, email, password } = req.body;
+        if (!name || !email || !password) return res.status(400).json({ error: 'All fields required' });
+        try {
+            const hashed = await bcrypt.hash(password, saltRounds);
+            db.query(
+                'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
+                [name, email, hashed, 'user'],
+                (err) => {
+                    if (err) {
+                        if (err.code === 'ER_DUP_ENTRY') return res.status(409).json({ error: 'Email already registered' });
+                        return res.status(500).json({ error: 'Registration failed' });
+                    }
+                    res.json({ success: true });
+                }
+            );
+        } catch (e) {
+            res.status(500).json({ error: 'Server error' });
+        }
+    });
+
+    app.post('/api/user/login', (req, res) => {
+        const { email, password } = req.body;
+        if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+        db.query('SELECT * FROM users WHERE email = ? AND role = "user"', [email], async (err, results) => {
+            if (err || !results || !results.length) return res.status(401).json({ error: 'Invalid credentials' });
+            const user = results[0];
+            const match = await bcrypt.compare(password, user.password);
+            if (!match) return res.status(401).json({ error: 'Invalid credentials' });
+            req.session.userSession = { id: user.id, name: user.name, email: user.email };
+            res.json({ success: true, name: user.name });
+        });
+    });
+
+    app.get('/api/user/logout', (req, res) => {
+        req.session.userSession = null;
+        res.json({ success: true });
+    });
+
+    app.get('/api/user/me', (req, res) => {
+        if (req.session && req.session.userSession) return res.json(req.session.userSession);
+        res.status(401).json({ error: 'Not logged in' });
+    });
 
     // Next.js page routing handler
     app.all('*', (req, res) => {

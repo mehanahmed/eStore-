@@ -5,6 +5,20 @@ import { useParams, usePathname, useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { gql } from '@apollo/client';
 import { useQuery } from '@apollo/client/react';
+import {
+    Star,
+    Heart,
+    Share2,
+    Plus,
+    Minus,
+    ShoppingBag,
+    FileText,
+    ListCheck,
+    Sparkles,
+    ChevronLeft as LucideChevronLeft,
+    ChevronRight as LucideChevronRight
+} from 'lucide-react';
+import { FaShieldHalved, FaTruckFast, FaBoxesPacking, FaHeadset } from 'react-icons/fa6';
 
 // === ICONS ===
 const YouTubeIcon = () => (
@@ -314,7 +328,27 @@ const RelatedCard = ({ item, idx }: { item: any, idx: number }) => {
                         <span style={{ color: '#595959' }}>({fakeCount})</span>
                     </div>
                 </div>
-                <div className="rc-category-badge">{item.category_name || 'Design'}</div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginTop: '4px' }}>
+                    <div className="rc-category-badge">{item.category_name || 'Design'}</div>
+                    {Boolean(item.price && Number(item.price) > 0) && (
+                        <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'baseline',
+                            fontWeight: 900,
+                            color: '#0f172a',
+                            fontSize: '13px',
+                            letterSpacing: '-0.02em',
+                            background: '#fff7ed',
+                            border: '1px solid #fed7aa',
+                            padding: '2px 7px',
+                            borderRadius: '6px',
+                            whiteSpace: 'nowrap'
+                        }}>
+                            <span style={{ color: '#ea580c', fontSize: '11px', marginRight: '1.5px', fontWeight: 900 }}>৳</span>
+                            <span>{Number(item.price).toLocaleString()}</span>
+                        </div>
+                    )}
+                </div>
             </div>
         </a>
     );
@@ -498,6 +532,9 @@ export default function ProductDetailPage() {
     const [storyExpanded, setStoryExpanded] = useState(false);
     const [isLongStory, setIsLongStory] = useState(false);
     const [descModalOpen, setDescModalOpen] = useState(false);
+    const [quantity, setQuantity] = useState(1);
+    const [activeTab, setActiveTab] = useState<'description' | 'specs' | 'shipping'>('description');
+    const [isWishlisted, setIsWishlisted] = useState(false);
 
     const catMenuRef = useRef<HTMLDivElement>(null);
     const searchBarRef = useRef<HTMLDivElement>(null);
@@ -525,7 +562,7 @@ export default function ProductDetailPage() {
         if (!src || src.startsWith('blob:') || src.startsWith('data:')) return src;
 
         if (!src.startsWith('http') && !src.startsWith('/')) {
-            src = '/' + src;
+            src = '/uploads/' + src;
         }
 
         if (src.includes('/opt-') && !src.includes('/uploads/') && !src.includes('/api/')) {
@@ -647,8 +684,8 @@ export default function ProductDetailPage() {
                 const gallery = images.map(url => {
                     let src = url;
                     if (!src.startsWith('http') && !src.startsWith('/')) {
-                        src = '/' + src;
-                    }
+            src = '/uploads/' + src;
+        }
                     if (src.includes('/opt-') && !src.includes('/uploads/') && !src.includes('/api/')) {
                         src = '/uploads' + src;
                     }
@@ -673,13 +710,19 @@ export default function ProductDetailPage() {
                 setGalleryItems(gallery);
                 setCurrentMediaIndex(0);
 
-                // Fetch Related Products
+                // Fetch Related / Recommended Products
                 const catIds = String(data.category_id || '').split(',').map(id => id.trim()).filter(Boolean).join(',');
-                const relatedRes = await fetch(`/api/public/related/${catIds}?exclude=${data.id}`);
+                const relatedRes = await fetch(`/api/public/related/${catIds || '0'}?exclude=${data.id}`);
                 const relatedData = await relatedRes.json();
-                if (Array.isArray(relatedData)) {
-                    setRelated(relatedData);
+                let relatedProducts = Array.isArray(relatedData) ? relatedData : [];
+                if (relatedProducts.length === 0) {
+                    const fallbackRes = await fetch(`/api/public/products?limit=8`);
+                    const fallbackData = await fallbackRes.json();
+                    if (Array.isArray(fallbackData)) {
+                        relatedProducts = fallbackData.filter((p: any) => p.id !== data.id);
+                    }
                 }
+                setRelated(relatedProducts);
 
             } catch (err) {
                 console.error('Error fetching product detail page details:', err);
@@ -703,7 +746,8 @@ export default function ProductDetailPage() {
     const inquireWhatsApp = () => {
         const currentUrl = typeof window !== 'undefined' ? window.location.href : '';
         const phoneNumber = "8801919760626";
-        const message = `Hello, I'm interested in this product ${currentUrl}. Can you please provide more information?`;
+        const qtyText = quantity > 1 ? ` (Quantity: ${quantity})` : '';
+        const message = `Hello, I'm interested in ordering ${product?.name || 'this product'}${qtyText} from ${currentUrl}. Can you please confirm availability?`;
         const encodedMessage = encodeURIComponent(message);
         const whatsappUrl = `https://api.whatsapp.com/send?phone=${phoneNumber}&text=${encodedMessage}`;
         window.open(whatsappUrl, '_blank');
@@ -820,7 +864,7 @@ export default function ProductDetailPage() {
     const seoMainImage = seoImages[0] || '';
     let seoImageUrl = seoMainImage;
     if (seoImageUrl && !seoImageUrl.startsWith('http') && !seoImageUrl.startsWith('/')) {
-        seoImageUrl = '/' + seoImageUrl;
+        seoImageUrl = '/uploads/' + seoImageUrl;
     }
     if (seoImageUrl.includes('/uploads/')) {
         seoImageUrl = seoImageUrl.replace('/uploads/', '/api/public/watermark/');
@@ -1585,272 +1629,394 @@ export default function ProductDetailPage() {
                     <span className="text-orange-500">{product.name}</span>
                 </nav>
 
-                <div className="flex flex-col lg:flex-row gap-16 md:gap-24 mb-10">
+                <div className="flex flex-col lg:flex-row gap-10 lg:gap-14 mb-12">
                     {/* Gallery Section */}
-                    <div className="w-full lg:w-[720px] shrink-0 flex flex-col gap-10">
-                        <div className="flex gap-4 md:gap-6 flex-col-reverse lg:flex-row h-auto lg:h-[600px]">
-                            {/* Thumbnails Row */}
-                            <div className="flex lg:flex-col gap-3 md:gap-4 overflow-x-auto lg:overflow-y-auto scrollbar-hide py-2 lg:py-0 w-full lg:w-24 shrink-0">
+                    <div className="w-full lg:w-[560px] xl:w-[620px] shrink-0 flex flex-col gap-4">
+                        {/* Main Active Media */}
+                        <div className="w-full aspect-square relative group rounded-2xl md:rounded-3xl overflow-hidden bg-white shadow-xs border border-slate-200/80 flex items-center justify-center">
+                            {galleryItems.length > 1 && (
+                                <div className="absolute top-4 right-4 bg-slate-900/75 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold text-white z-20 shadow-sm tracking-wider">
+                                    {currentMediaIndex + 1} / {galleryItems.length}
+                                </div>
+                            )}
+
+                            <div className="w-full h-full relative overflow-hidden flex items-center justify-center p-2">
+                                {renderActiveMedia()}
+                            </div>
+
+                            {galleryItems.length > 1 && (
+                                <>
+                                    <button
+                                        onClick={prevMedia}
+                                        aria-label="Previous image"
+                                        className="absolute left-3.5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white text-slate-700 hover:text-orange-600 rounded-full flex items-center justify-center shadow-md border border-slate-200/80 transition-all opacity-0 group-hover:opacity-100 z-20 active:scale-95 cursor-pointer"
+                                    >
+                                        <LucideChevronLeft className="w-5 h-5" />
+                                    </button>
+                                    <button
+                                        onClick={nextMedia}
+                                        aria-label="Next image"
+                                        className="absolute right-3.5 top-1/2 -translate-y-1/2 w-10 h-10 bg-white/90 hover:bg-white text-slate-700 hover:text-orange-600 rounded-full flex items-center justify-center shadow-md border border-slate-200/80 transition-all opacity-0 group-hover:opacity-100 z-20 active:scale-95 cursor-pointer"
+                                    >
+                                        <LucideChevronRight className="w-5 h-5" />
+                                    </button>
+                                </>
+                            )}
+                        </div>
+
+                        {/* Horizontal Thumbnails Row (below main image) */}
+                        {galleryItems.length > 1 && (
+                            <div className="flex gap-3 overflow-x-auto scrollbar-hide py-1 px-0.5">
                                 {galleryItems.map((item, idx) => {
                                     const isActive = idx === currentMediaIndex;
-                                    const activeClass = isActive
-                                        ? 'border-slate-400 scale-105 opacity-100 shadow-md'
-                                        : 'border-slate-200/80 opacity-60 hover:opacity-100 hover:scale-102 hover:border-slate-300';
-
-                                    if (item.type === 'video') {
-                                        return (
-                                            <button
-                                                key={idx}
-                                                onClick={() => switchMedia(idx)}
-                                                className={`relative w-20 h-20 lg:w-full lg:h-24 rounded-2xl overflow-hidden transition-all duration-300 shrink-0 border-2 bg-slate-950 ${activeClass}`}
-                                            >
-                                                <div className="w-full h-full flex items-center justify-center">
-                                                    <div className="absolute inset-0 flex items-center justify-center z-10">
-                                                        <div className="w-9 h-9 rounded-full bg-white/95 flex items-center justify-center shadow-lg backdrop-blur-sm transform active:scale-90 transition-transform">
-                                                            <svg className="w-4 h-4 text-orange-600 ml-0.5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </button>
-                                        );
-                                    }
-
                                     return (
                                         <button
                                             key={idx}
                                             onClick={() => switchMedia(idx)}
-                                            className={`relative w-20 h-20 lg:w-full lg:h-24 rounded-2xl overflow-hidden transition-all duration-300 shrink-0 border-2 bg-white ${activeClass} shimmer-sweep`}
+                                            className={`relative w-20 h-20 rounded-xl overflow-hidden shrink-0 border-2 transition-all bg-white cursor-pointer ${
+                                                isActive
+                                                    ? 'border-orange-500 shadow-md ring-2 ring-orange-500/20 scale-102'
+                                                    : 'border-slate-200/80 hover:border-slate-300 opacity-70 hover:opacity-100'
+                                            }`}
                                         >
-                                            <img src={getThumb(item.src)} className="w-full h-full object-contain p-1" alt={`Thumbnail ${idx + 1}`} />
+                                            {item.type === 'video' ? (
+                                                <div className="w-full h-full bg-slate-900 flex items-center justify-center">
+                                                    <div className="w-7 h-7 rounded-full bg-white/95 flex items-center justify-center text-orange-600 shadow-sm">
+                                                        <svg className="w-3.5 h-3.5 fill-current ml-0.5" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <img src={getThumb(item.src)} className="w-full h-full object-contain p-1" alt={`Thumbnail ${idx + 1}`} />
+                                            )}
                                         </button>
                                     );
                                 })}
                             </div>
+                        )}
+                    </div>
 
-                            {/* Main Active Media */}
-                            <div className="w-full lg:w-[600px] aspect-square relative group rounded-3xl overflow-hidden bg-white shadow-2xl border border-slate-100/80">
-                                <div className="absolute top-4 right-4 bg-slate-900/80 backdrop-blur-md px-3.5 py-1.5 rounded-full text-xs font-black text-white/95 z-20 shadow-lg tracking-wider border border-slate-800/20">
-                                    {currentMediaIndex + 1} / {galleryItems.length}
-                                </div>
-                                <div className="w-full h-full relative overflow-hidden flex items-center justify-center">
-                                    {renderActiveMedia()}
-                                </div>
+                    {/* Buy Box / Details Section */}
+                    <div className="flex-1 flex flex-col justify-start">
+                        {/* Product Title */}
+                        <h1 className="text-2xl sm:text-3xl lg:text-4xl font-black text-slate-900 tracking-tight leading-tight mb-2.5">
+                            {product.name}
+                        </h1>
 
-                                <button onClick={prevMedia}
-                                    className="absolute left-4 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:bg-orange-500 hover:text-white active:scale-95 active:bg-orange-600 transition-all opacity-0 group-hover:opacity-100 z-[100] text-slate-800">
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path d="M15 19l-7-7 7-7" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                    </svg>
-                                </button>
-                                <button onClick={nextMedia}
-                                    className="absolute right-4 top-1/2 -translate-y-1/2 w-11 h-11 bg-white/90 backdrop-blur-md rounded-full flex items-center justify-center shadow-lg hover:bg-orange-500 hover:text-white active:scale-95 active:bg-orange-600 transition-all opacity-0 group-hover:opacity-100 z-[100] text-slate-800">
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path d="M9 5l7 7-7 7" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-                                    </svg>
-                                </button>
-                                <div className="absolute inset-0 pointer-events-none bg-linear-to-t from-slate-900/5 to-transparent" />
+                        {/* Rating & Stock Status */}
+                        <div className="flex items-center gap-3 mb-5 flex-wrap">
+                            <div className="flex items-center gap-1.5">
+                                <div className="flex items-center text-amber-400">
+                                    {[...Array(5)].map((_, i) => (
+                                        <Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />
+                                    ))}
+                                </div>
+                                <span className="text-sm font-bold text-slate-800">5.0</span>
+                                <span className="text-xs text-slate-400 font-medium">(48 reviews)</span>
+                            </div>
+                            <span className="text-slate-300">•</span>
+                            <div className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
+                                <span className="relative flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                                </span>
+                                <span>In Stock • Ready to Dispatch</span>
                             </div>
                         </div>
 
-                        {/* Slide Collection / Also in this collection */}
-                        {related.length > 0 && (
-                            <div className="group/related mt-4">
-                                <div className="mb-4">
-                                    <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
-                                        <span className="w-8 h-0.5 bg-orange-500"></span>
-                                        Also in this collection
-                                    </h3>
+                        {/* Price & Quantity Row */}
+                        <div className="py-4 my-2 border-y border-slate-100">
+                            <div className="flex items-end justify-between gap-4 flex-wrap">
+                                <div>
+                                    <div className="flex items-baseline gap-2">
+                                        {Number(product.price) > 0 ? (
+                                            <span className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tight">
+                                                ৳{Number(product.price).toLocaleString()}
+                                            </span>
+                                        ) : (
+                                            <span className="text-2xl sm:text-3xl font-black text-slate-800 tracking-tight">
+                                                Custom Order
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-1">
+                                        {Number(product.price) > 0
+                                            ? 'Tax included • Nationwide express delivery available'
+                                            : 'Custom sizing & specifications available • Contact on WhatsApp'}
+                                    </p>
                                 </div>
-                                <div className="relative px-2">
-                                    <div className="flex gap-4 overflow-x-auto scrollbar-hide scroll-smooth pb-1 px-1">
-                                        {related.map((item) => (
-                                            <SideRelatedCard key={item.id} item={item} />
-                                        ))}
+
+                                {/* Quantity Selector */}
+                                {Boolean(product.allow_buy_now && product.price) && (
+                                    <div className="flex items-center gap-2">
+                                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Qty:</span>
+                                        <div className="flex items-center border border-slate-200 rounded-xl bg-white shadow-xs p-0.5">
+                                            <button
+                                                onClick={() => setQuantity(q => Math.max(1, q - 1))}
+                                                disabled={quantity <= 1}
+                                                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 hover:text-orange-600 hover:bg-slate-100 disabled:opacity-30 disabled:hover:bg-transparent transition-colors cursor-pointer"
+                                                aria-label="Decrease quantity"
+                                            >
+                                                <Minus className="w-3.5 h-3.5" />
+                                            </button>
+                                            <span className="w-9 text-center font-black text-sm text-slate-800">{quantity}</span>
+                                            <button
+                                                onClick={() => setQuantity(q => q + 1)}
+                                                className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-600 hover:text-orange-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                                                aria-label="Increase quantity"
+                                            >
+                                                <Plus className="w-3.5 h-3.5" />
+                                            </button>
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Primary Action Buttons */}
+                        <div className="flex flex-col sm:flex-row gap-3 my-5">
+                            {Boolean(product.allow_buy_now && product.price) && (
+                                <a
+                                    href={`/checkout/?product=${product.id}&qty=${quantity}`}
+                                    className="flex-1 min-w-[190px] bg-[#ea580c] hover:bg-[#c2410c] text-white px-6 py-4 rounded-xl text-base font-extrabold shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 hover:-translate-y-0.5 active:scale-98 transition-all flex items-center justify-center gap-2.5 text-center cursor-pointer"
+                                >
+                                    <ShoppingBag className="w-5 h-5 text-white" />
+                                    <span>Buy Now</span>
+                                </a>
+                            )}
+
+                            <button
+                                onClick={inquireWhatsApp}
+                                className="flex-1 min-w-[190px] bg-[#25D366] hover:bg-[#20bd5a] text-white px-6 py-4 rounded-xl text-base font-extrabold shadow-lg shadow-emerald-500/20 hover:shadow-emerald-500/35 hover:-translate-y-0.5 active:scale-98 transition-all flex items-center justify-center gap-2 group cursor-pointer"
+                            >
+                                <WhatsAppIcon />
+                                <span>Order via WhatsApp</span>
+                            </button>
+
+                            <div className="flex gap-2 justify-center sm:justify-start">
+                                <button
+                                    onClick={() => setIsWishlisted(!isWishlisted)}
+                                    className={`p-4 rounded-xl border transition-all active:scale-95 cursor-pointer ${
+                                        isWishlisted
+                                            ? 'bg-rose-50 border-rose-200 text-rose-600'
+                                            : 'bg-white border-slate-200 text-slate-600 hover:text-rose-600 hover:bg-slate-50'
+                                    }`}
+                                    title={isWishlisted ? "Remove from wishlist" : "Add to wishlist"}
+                                    aria-label="Wishlist"
+                                >
+                                    <Heart className={`w-5 h-5 ${isWishlisted ? 'fill-current' : ''}`} />
+                                </button>
+                                <button
+                                    onClick={shareProduct}
+                                    className="p-4 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 transition-all active:scale-95 cursor-pointer"
+                                    title="Share Product"
+                                    aria-label="Share"
+                                >
+                                    <Share2 className="w-5 h-5" />
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Professional Trust Badges */}
+                        <div className="grid grid-cols-2 gap-2.5 my-4">
+                            <div className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+                                <div className="w-8 h-8 rounded-lg bg-orange-100/70 text-orange-600 flex items-center justify-center shrink-0">
+                                    <FaShieldHalved className="w-4 h-4 text-orange-600" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-xs font-bold text-slate-900 truncate">100% Authentic</p>
+                                    <p className="text-[11px] text-slate-500 truncate">Studio verified quality</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+                                <div className="w-8 h-8 rounded-lg bg-orange-100/70 text-orange-600 flex items-center justify-center shrink-0">
+                                    <FaTruckFast className="w-4 h-4 text-orange-600" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-xs font-bold text-slate-900 truncate">Fast Delivery</p>
+                                    <p className="text-[11px] text-slate-500 truncate">24-48h inside Dhaka</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+                                <div className="w-8 h-8 rounded-lg bg-orange-100/70 text-orange-600 flex items-center justify-center shrink-0">
+                                    <FaBoxesPacking className="w-4 h-4 text-orange-600" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-xs font-bold text-slate-900 truncate">Safe Packaging</p>
+                                    <p className="text-[11px] text-slate-500 truncate">Multi-layer bubble wrap</p>
+                                </div>
+                            </div>
+
+                            <div className="flex items-center gap-2.5 p-3 rounded-xl bg-slate-50/80 border border-slate-100">
+                                <div className="w-8 h-8 rounded-lg bg-orange-100/70 text-orange-600 flex items-center justify-center shrink-0">
+                                    <FaHeadset className="w-4 h-4 text-orange-600" />
+                                </div>
+                                <div className="min-w-0">
+                                    <p className="text-xs font-bold text-slate-900 truncate">Direct Support</p>
+                                    <p className="text-[11px] text-slate-500 truncate">Instant WhatsApp help</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Recommended Product Suggestion in Buy Box */}
+                        
+                    </div>
+                </div>
+
+                
+
+                {/* Product Information Tabs Section */}
+                <section className="my-10 bg-white rounded-2xl md:rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden">
+                    {/* Tab Navigation */}
+                    <div className="flex border-b border-slate-200 overflow-x-auto scrollbar-hide bg-slate-50/50">
+                        <button
+                            onClick={() => setActiveTab('description')}
+                            className={`px-6 py-4 text-sm font-extrabold tracking-wide uppercase flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+                                activeTab === 'description'
+                                    ? 'border-orange-500 text-orange-600 bg-white'
+                                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/50'
+                            }`}
+                        >
+                            <FileText className="w-4 h-4" />
+                            <span>Description</span>
+                        </button>
+
+                        <button
+                            onClick={() => setActiveTab('specs')}
+                            className={`px-6 py-4 text-sm font-extrabold tracking-wide uppercase flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+                                activeTab === 'specs'
+                                    ? 'border-orange-500 text-orange-600 bg-white'
+                                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/50'
+                            }`}
+                        >
+                            <ListCheck className="w-4 h-4" />
+                            <span>Features & Specifications</span>
+                        </button>
+
+                        <button
+                            onClick={() => setActiveTab('shipping')}
+                            className={`px-6 py-4 text-sm font-extrabold tracking-wide uppercase flex items-center gap-2 border-b-2 transition-all cursor-pointer whitespace-nowrap ${
+                                activeTab === 'shipping'
+                                    ? 'border-orange-500 text-orange-600 bg-white'
+                                    : 'border-transparent text-slate-500 hover:text-slate-800 hover:bg-slate-100/50'
+                            }`}
+                        >
+                            <FaTruckFast className="w-4 h-4" />
+                            <span>Shipping & Delivery</span>
+                        </button>
+                    </div>
+
+                    {/* Tab Contents */}
+                    <div className="p-6 md:p-8">
+                        {activeTab === 'description' && (
+                            <div className="max-w-4xl">
+                                <div
+                                    className="markdown-content text-base md:text-[17px] text-slate-600 leading-relaxed font-medium"
+                                    dangerouslySetInnerHTML={{
+                                        __html: parseMarkdownDescription(product.description || 'This premium design is part of our curated studio collection.')
+                                    }}
+                                />
+                            </div>
+                        )}
+
+                        {activeTab === 'specs' && (
+                            <div className="max-w-3xl">
+                                <h3 className="text-lg font-black text-slate-900 mb-4">Product Specifications</h3>
+                                <div className="border border-slate-200 rounded-xl overflow-hidden divide-y divide-slate-200">
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 p-3.5 bg-slate-50/60 text-sm">
+                                        <span className="font-bold text-slate-700">Product SKU</span>
+                                        <span className="sm:col-span-2 text-slate-600 font-mono">PROD-{product.id}</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 p-3.5 bg-white text-sm">
+                                        <span className="font-bold text-slate-700">Category</span>
+                                        <span className="sm:col-span-2 text-slate-600">{product.category_name || 'Design & Accessories'}</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 p-3.5 bg-slate-50/60 text-sm">
+                                        <span className="font-bold text-slate-700">Brand / Studio</span>
+                                        <span className="sm:col-span-2 text-slate-600">Color Hut Studio</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 p-3.5 bg-white text-sm">
+                                        <span className="font-bold text-slate-700">Availability</span>
+                                        <span className="sm:col-span-2 text-emerald-600 font-bold">In Stock • Ready to Dispatch</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 p-3.5 bg-slate-50/60 text-sm">
+                                        <span className="font-bold text-slate-700">Customization</span>
+                                        <span className="sm:col-span-2 text-slate-600">Custom sizing & specifications available upon request via WhatsApp</span>
+                                    </div>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 p-3.5 bg-white text-sm">
+                                        <span className="font-bold text-slate-700">Country of Origin</span>
+                                        <span className="sm:col-span-2 text-slate-600">Bangladesh</span>
                                     </div>
                                 </div>
                             </div>
                         )}
-                    </div>
 
-                    {/* Content Section */}
-                    <div className="flex-1 flex flex-col justify-start">
-                        <div className="mb-2">
-                            <h1 className="text-[21px] md:text-[34px] lg:text-[42px] font-black tracking-tight text-slate-900 leading-tight mb-3">
-                                {product.name}
-                            </h1>
-                            <RatingStars rating={Number(product.rating) || 5.0} />
-                        </div>
-
-                        {/* Premium Highlights badges Grid */}
-                        <div className="grid grid-cols-2 gap-4 py-4 border-y border-slate-100 mb-5">
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-orange-50/80 flex items-center justify-center text-orange-600 border border-orange-100/40">
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                </div>
+                        {activeTab === 'shipping' && (
+                            <div className="max-w-3xl space-y-6">
                                 <div>
-                                    <div className="font-extrabold text-[11px] text-slate-800 uppercase tracking-wider">Secure Checkout</div>
-                                    <div className="text-[10px] font-bold text-slate-400">100% Safe WhatsApp Orders</div>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-indigo-50/80 flex items-center justify-center text-indigo-600 border border-indigo-100/40">
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                </div>
-                                <div>
-                                    <div className="font-extrabold text-[11px] text-slate-800 uppercase tracking-wider">Secure Parcel</div>
-                                    <div className="text-[10px] font-bold text-slate-400">Insured Safe Worldwide Pack</div>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-emerald-50/80 flex items-center justify-center text-emerald-600 border border-emerald-100/40">
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                </div>
-                                <div>
-                                    <div className="font-extrabold text-[11px] text-slate-800 uppercase tracking-wider">Original Studio</div>
-                                    <div className="text-[10px] font-bold text-slate-400">Official Color Hut BD Design</div>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-3">
-                                <div className="w-10 h-10 rounded-2xl bg-amber-50/80 flex items-center justify-center text-amber-600 border border-amber-100/40">
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 8v13m0-13V6a2 2 0 112 2h-2zm0 0V5.5A2.5 2.5 0 109.5 8H12zm-7 4h14M5 12a2 2 0 110-4h14a2 2 0 110 4M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                </div>
-                                <div>
-                                    <div className="font-extrabold text-[11px] text-slate-800 uppercase tracking-wider">Premium Boxed</div>
-                                    <div className="text-[10px] font-bold text-slate-400">Curated Safe Wrapping</div>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="space-y-6">
-                            {/* Premium Editorial Story Container */}
-                            <div className="bg-white rounded-3xl p-6 md:p-8 border border-slate-100 shadow-xl shadow-slate-100/40 relative overflow-hidden group/story">
-                                <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-orange-400 via-amber-500 to-orange-500"></div>
-                                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-400 mb-6 flex items-center gap-2">
-                                    <span className="w-2 h-2 rounded-full bg-orange-500"></span>
-                                    Description
-                                </h3>
-
-                                <div className="relative">
-                                    <div
-                                        ref={storyCallbackRef}
-                                        className={`transition-all duration-500 ease-in-out overflow-hidden ${isLongStory ? 'max-h-[90px]' : 'max-h-[5000px]'
-                                            }`}
-                                    >
-                                        <div
-                                            className="markdown-content text-base md:text-[17px] text-slate-600 leading-relaxed font-medium"
-                                            dangerouslySetInnerHTML={{
-                                                __html: parseMarkdownDescription(product.description || 'This premium design is part of our curated studio collection.')
-                                            }}
-                                        />
+                                    <h3 className="text-lg font-black text-slate-900 mb-2">Delivery Timeframe & Rates</h3>
+                                    <p className="text-sm text-slate-600 leading-relaxed mb-4">
+                                        We deliver nationwide across Bangladesh using trusted courier partners including Steadfast, SA Paribahan, and Sundarban Courier.
+                                    </p>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50">
+                                            <span className="text-xs font-bold uppercase tracking-wider text-orange-600 block mb-1">Inside Dhaka Metro</span>
+                                            <span className="text-base font-extrabold text-slate-900 block">24 – 48 Hours</span>
+                                            <span className="text-xs text-slate-500 font-medium">Standard home delivery</span>
+                                        </div>
+                                        <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50">
+                                            <span className="text-xs font-bold uppercase tracking-wider text-orange-600 block mb-1">Outside Dhaka Metro</span>
+                                            <span className="text-base font-extrabold text-slate-900 block">2 – 4 Business Days</span>
+                                            <span className="text-xs text-slate-500 font-medium">District & Thana level express courier</span>
+                                        </div>
                                     </div>
+                                </div>
 
-                                    {/* Facebook Post Style See More Overlay (triggers Modal) */}
-                                    {isLongStory && (
-                                        <button
-                                            onClick={() => setDescModalOpen(true)}
-                                            className="absolute bottom-0 right-0 bg-linear-to-l from-white via-white/95 via-white/80 to-transparent pl-12 pr-1 py-1 text-[13px] md:text-sm font-black text-orange-500 hover:text-orange-600 cursor-pointer z-20 flex items-center gap-0.5 leading-none transition-colors"
-                                        >
-                                            <span className="text-slate-400 font-normal">...</span> See More
-                                        </button>
-                                    )}
+                                <div className="pt-4 border-t border-slate-200">
+                                    <h4 className="text-sm font-black text-slate-900 mb-2">Safe Packaging Guarantee</h4>
+                                    <p className="text-sm text-slate-600 leading-relaxed">
+                                        Every order is securely wrapped with multi-layered protective bubble wrap and packaged in heavy-duty cardboard boxes to ensure zero damage during transit.
+                                    </p>
+                                </div>
+
+                                <div className="pt-4 border-t border-slate-200">
+                                    <h4 className="text-sm font-black text-slate-900 mb-2">Payment Methods</h4>
+                                    <p className="text-sm text-slate-600 leading-relaxed">
+                                        We accept Cash on Delivery (COD), bKash, Nagad, and direct bank transfer.
+                                    </p>
                                 </div>
                             </div>
-
-                            {/* Description Modal Dialog */}
-                            <AnimatePresence>
-                                {descModalOpen && (
-                                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:p-6">
-                                        {/* Backdrop with Blur */}
-                                        <motion.div
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
-                                            exit={{ opacity: 0 }}
-                                            onClick={() => setDescModalOpen(false)}
-                                            className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
-                                        />
-
-                                        {/* Modal Container */}
-                                        <motion.div
-                                            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-                                            animate={{ opacity: 1, scale: 1, y: 0 }}
-                                            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-                                            transition={{ type: "spring", duration: 0.5, bounce: 0.15 }}
-                                            className="bg-white w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl relative border border-slate-100 flex flex-col max-h-[80vh] z-10"
-                                        >
-                                            {/* Accent Line */}
-                                            <div className="absolute top-0 left-0 w-full h-1 bg-linear-to-r from-orange-400 via-amber-500 to-orange-500 z-20"></div>
-
-                                            {/* Modal Header */}
-                                            <div className="p-6 md:p-8 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-                                                <h3 className="text-xs font-black uppercase tracking-[0.2em] text-slate-500 flex items-center gap-2">
-                                                    <span className="w-2.5 h-2.5 rounded-full bg-orange-500"></span>
-                                                    Product Description
-                                                </h3>
-                                                <button
-                                                    onClick={() => setDescModalOpen(false)}
-                                                    className="w-9 h-9 rounded-2xl bg-white hover:bg-slate-100 text-slate-400 hover:text-slate-600 border border-slate-200/60 shadow-sm flex items-center justify-center transition-all active:scale-90"
-                                                >
-                                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M6 18L18 6M6 6l12 12" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                                </button>
-                                            </div>
-
-                                            {/* Modal Scrollable Content */}
-                                            <div className="p-6 md:p-8 overflow-y-auto flex-1 bg-white">
-                                                <div
-                                                    className="markdown-content text-base md:text-[17px] text-slate-600 leading-relaxed font-medium"
-                                                    dangerouslySetInnerHTML={{
-                                                        __html: parseMarkdownDescription(product.description || 'This premium design is part of our curated studio collection.')
-                                                    }}
-                                                />
-                                            </div>
-
-                                            {/* Modal Footer */}
-                                            <div className="p-6 md:p-8 border-t border-slate-100 flex justify-end bg-slate-50/50">
-                                                <button
-                                                    onClick={() => setDescModalOpen(false)}
-                                                    className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-full text-xs font-black uppercase tracking-widest shadow-sm transition-all active:scale-95"
-                                                >
-                                                    Close
-                                                </button>
-                                            </div>
-                                        </motion.div>
-                                    </div>
-                                )}
-                            </AnimatePresence>
-
-                            {/* Elevated CTA buttons */}
-                            <div className="pt-4 flex flex-row gap-3 justify-center sm:justify-start">
-                                <button
-                                    onClick={inquireWhatsApp}
-                                    className="w-full max-w-[230px] bg-linear-to-r from-emerald-500 via-emerald-600 to-teal-600 text-white px-3 sm:px-5 py-3.5 sm:py-4.5 rounded-2xl text-sm sm:text-base font-extrabold hover:from-emerald-600 hover:to-teal-700 hover:-translate-y-0.5 transition-all duration-300 shadow-lg shadow-emerald-500/20 hover:shadow-xl hover:shadow-emerald-500/35 active:scale-98 flex items-center justify-center gap-1 sm:gap-1.5 animate-attract group/cta whitespace-nowrap"
-                                >
-                                    <WhatsAppIcon />
-                                    <span>Order via WhatsApp</span>
-                                    <svg className="w-5 h-5 group-hover/cta:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M14 5l7 7m0 0l-7 7m7-7H3" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                                </button>
-
-                                <button
-                                    onClick={shareProduct}
-                                    className="px-3 sm:px-4 py-3.5 sm:py-4.5 bg-white hover:bg-slate-50 text-slate-700 hover:text-slate-900 border border-slate-200 shadow-sm hover:shadow-md hover:-translate-y-0.5 font-extrabold rounded-2xl transition-all duration-300 active:scale-95 flex items-center justify-center gap-1.5 sm:gap-2"
-                                    title="Share Creation"
-                                >
-                                    <svg className="w-5 h-5 text-slate-600" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                                        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-                                        <polyline points="16 6 12 2 8 6" />
-                                        <line x1="12" y1="2" x2="12" y2="15" />
-                                    </svg>
-                                    <span>Share</span>
-                                </button>
-                            </div>
-                        </div>
+                        )}
                     </div>
-                </div>
+                </section>
 
-                {/* Related Creations Section */}
+
+
+                {/* Recommended or Similar Products Section (Directly after main product) */}
                 {related.length > 0 && (
-                    <section className="mt-6">
-                        <div className="mb-8">
-                            <h2 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">Explore more.</h2>
+                    <section id="recommended-products" className="my-10 pt-8 border-t border-slate-200/80">
+                        <div className="mb-6 flex items-end justify-between flex-wrap gap-4">
+                            <div>
+                                <span className="text-xs font-black uppercase tracking-widest text-orange-600 block mb-1">
+                                    Curated For You
+                                </span>
+                                <h2 className="text-2xl md:text-3xl font-black tracking-tight text-slate-900">
+                                    Recommended & Similar Products
+                                </h2>
+                                <p className="text-xs md:text-sm text-slate-500 mt-1 font-medium">
+                                    Complementary items and top studio designs you may also like
+                                </p>
+                            </div>
+                            {product.category_id && (
+                                <a
+                                    href={`/${product.category_id}/${product.category_name?.toLowerCase().replace(/\s+/g, '-')}/`}
+                                    className="text-xs md:text-sm font-extrabold text-orange-600 hover:text-orange-700 flex items-center gap-1 hover:underline"
+                                >
+                                    <span>Browse more {product.category_name}</span>
+                                    <LucideChevronRight className="w-4 h-4" />
+                                </a>
+                            )}
                         </div>
                         <div className="related-store-grid">
                             {related.map((item, idx) => (
@@ -1859,6 +2025,10 @@ export default function ProductDetailPage() {
                         </div>
                     </section>
                 )}
+
+
+
+
             </main>
 
             {/* --- FOOTER --- */}

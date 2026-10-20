@@ -1,5 +1,6 @@
 'use client';
 
+import AdminSidebar from '../AdminSidebar';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Sortable from 'sortablejs';
 import { 
@@ -416,123 +417,7 @@ export default function CategoriesPage() {
       )}
 
       {/* Sidebar Navigation */}
-      <aside 
-        className={`bg-white border-r border-slate-200 flex flex-col shrink-0 z-50 transition-all duration-300 ease-in-out
-          ${isMobileOpen ? 'fixed inset-y-0 left-0 w-64' : 'hidden md:flex'}
-          ${isSidebarCollapsed ? 'md:w-20' : 'md:w-64'}
-        `}
-      >
-        {/* Sidebar Header */}
-        <div className={`h-20 flex items-center justify-between border-b border-slate-100 relative group px-6 ${isSidebarCollapsed ? 'md:justify-center md:px-2' : ''}`}>
-          <a href="/admin/dashboard" className="flex items-center gap-2.5">
-            <img 
-              src="/logo.png" 
-              alt="Color Hut" 
-              className={`object-contain transition-all duration-300 ${isSidebarCollapsed ? 'md:h-6' : 'h-8'}`} 
-            />
-          </a>
-
-          {/* Sidebar Collapse Toggle */}
-          <button 
-            onClick={toggleSidebar}
-            className={`absolute -right-3 top-1/2 -translate-y-1/2 bg-white border border-slate-200 rounded-full p-1.5 shadow-sm text-slate-400 hover:text-brand-500 hover:border-brand-300 transition-all duration-300 md:block hidden
-              ${isSidebarCollapsed ? 'rotate-180' : 'opacity-0 group-hover:opacity-100'}
-            `}
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Close Sidebar Drawer (Mobile) */}
-          <button 
-            onClick={() => setIsMobileOpen(false)}
-            className="md:hidden p-1 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 hover:text-slate-600"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Sidebar Links Navigation */}
-        <nav className="flex-1 py-6 overflow-y-auto space-y-1 overflow-x-hidden">
-          {/* Overview List */}
-          <div className="mb-6">
-            <p className={`text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 whitespace-nowrap ${isSidebarCollapsed ? 'text-center px-4' : 'px-8'}`}>
-              {isSidebarCollapsed ? '•••' : 'Overview'}
-            </p>
-            {sidebarLinks.overview.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                className={`relative flex items-center py-3 text-sm font-bold transition-all duration-300 group ${
-                  isSidebarCollapsed ? 'justify-center px-0' : 'px-8'
-                } ${
-                  link.active 
-                    ? 'text-orange-600 bg-linear-to-r from-orange-50/50 to-white border-r-[3px] border-orange-600' 
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-orange-600 hover:pl-10'
-                }`}
-                title={link.name}
-              >
-                <link.icon className="w-5 h-5 shrink-0" />
-                <span className={`ml-3 whitespace-nowrap transition-opacity duration-300 ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
-                  {link.name}
-                </span>
-              </a>
-            ))}
-          </div>
-
-          {/* Management List */}
-          <div>
-            <p className={`text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 whitespace-nowrap ${isSidebarCollapsed ? 'text-center px-4' : 'px-8'}`}>
-              {isSidebarCollapsed ? '•••' : 'Management'}
-            </p>
-            {sidebarLinks.management.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                className={`relative flex items-center py-3 text-sm font-bold transition-all duration-300 group ${
-                  isSidebarCollapsed ? 'justify-center px-0' : 'px-8'
-                } ${
-                  link.active 
-                    ? 'text-orange-600 bg-linear-to-r from-orange-50/50 to-white border-r-[3px] border-orange-600' 
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-orange-600 hover:pl-10'
-                }`}
-                title={link.name}
-              >
-                <link.icon className="w-5 h-5 shrink-0" />
-                <span className={`ml-3 whitespace-nowrap transition-opacity duration-300 ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
-                  {link.name}
-                </span>
-              </a>
-            ))}
-          </div>
-        </nav>
-
-        {/* Sidebar Footer profile */}
-        <div className="p-4 border-t border-slate-100/80">
-          <div className={`flex items-center mb-3 rounded-xl transition-colors hover:bg-slate-50 ${isSidebarCollapsed ? 'md:justify-center md:p-2' : 'px-3 py-2 gap-3'}`}>
-            <img 
-              src="https://ui-avatars.com/api/?name=Admin+User&background=f97316&color=fff"
-              className="w-8 h-8 rounded-full shrink-0" 
-              alt="Admin"
-            />
-            {!isSidebarCollapsed && (
-              <div className="text-left overflow-hidden">
-                <div className="text-slate-900 text-sm font-extrabold truncate">Admin User</div>
-                <div className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Studio Manager</div>
-              </div>
-            )}
-          </div>
-          <a 
-            href="/admin/logout" 
-            className={`w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors ${
-              isSidebarCollapsed ? 'md:px-0' : 'px-4'
-            }`}
-            title="Logout"
-          >
-            <LogOut className="w-4 h-4 shrink-0" />
-            <span className={`${isSidebarCollapsed ? 'md:hidden' : 'block'} whitespace-nowrap`}>Logout</span>
-          </a>
-        </div>
-      </aside>
+      <AdminSidebar />
 
       {/* Main Container Context */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">

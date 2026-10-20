@@ -1,6 +1,7 @@
-﻿'use client';
+'use client';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import AdminSidebar from '../AdminSidebar';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import Sortable from 'sortablejs';
 import { 
   LayoutDashboard,
@@ -49,7 +50,8 @@ import {
   Eraser,
   Palette,
   Highlighter,
-  Video
+  Video,
+  ShoppingCart
 } from 'lucide-react';
 
 interface Product {
@@ -66,6 +68,8 @@ interface Product {
   seo_description?: string | null;
   position: number;
   is_pinned: boolean | number;
+  price?: number | string | null;
+  allow_buy_now?: boolean | number | string | null;
 }
 
 interface Category {
@@ -173,6 +177,13 @@ function ModernDropdown({
 }
 
 export default function ProductsPage() {
+
+  const formatAdminImageUrl = (img?: string) => {
+    if (!img) return "https://via.placeholder.com/100";
+    if (img.startsWith("http") || img.startsWith("data:")) return img;
+    return img.startsWith("/") ? (img.startsWith("/uploads/") ? img : "/uploads" + img) : "/uploads/" + img;
+  };
+
   // Products listing
   const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -210,6 +221,8 @@ export default function ProductsPage() {
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
   const [productPosition, setProductPosition] = useState(0);
   const [productIsPinned, setProductIsPinned] = useState(0);
+  const [allowBuyNow, setAllowBuyNow] = useState(false);
+  const [productPrice, setProductPrice] = useState('');
 
   // Modal editor preview mode
   const [isPreviewMode, setIsPreviewMode] = useState(false);
@@ -488,6 +501,8 @@ export default function ProductsPage() {
     setUploadedImages([]);
     setProductPosition(0);
     setProductIsPinned(0);
+    setAllowBuyNow(false);
+    setProductPrice('');
     setIsPreviewMode(false);
     setCatSearchQuery('');
     setIsModalOpen(true);
@@ -508,6 +523,9 @@ export default function ProductsPage() {
     setProductVideo(product.video_url || '');
     setProductPosition(product.position || 0);
     setProductIsPinned(product.is_pinned ? 1 : 0);
+    const isBuyNow = product.allow_buy_now === 1 || product.allow_buy_now === true || product.allow_buy_now === '1';
+    setAllowBuyNow(Boolean(isBuyNow));
+    setProductPrice(product.price !== undefined && product.price !== null && product.price !== '' ? String(product.price) : '');
     setIsPreviewMode(false);
     setCatSearchQuery('');
 
@@ -1273,10 +1291,17 @@ export default function ProductsPage() {
     if (e) e.preventDefault();
     if (!productName.trim()) return;
 
+    if (allowBuyNow && (!productPrice || isNaN(Number(productPrice)) || Number(productPrice) <= 0)) {
+      showToast('Please enter a valid price for the Buy Now option.', 'error');
+      return;
+    }
+
     const payload = {
       name: productName,
       category_id: selectedCategoryIds.join(','),
       description: productDescription,
+      price: allowBuyNow && productPrice ? parseFloat(productPrice) : null,
+      allow_buy_now: allowBuyNow ? 1 : 0,
       image: JSON.stringify(uploadedImages),
       video_url: productVideo || null,
       status: productStatus,
@@ -1416,123 +1441,7 @@ export default function ProductsPage() {
       )}
 
       {/* Sidebar Navigation */}
-      <aside 
-        className={`bg-white border-r border-slate-200 flex flex-col shrink-0 z-50 transition-all duration-300 ease-in-out
-          ${isMobileOpen ? 'fixed inset-y-0 left-0 w-64' : 'hidden md:flex'}
-          ${isSidebarCollapsed ? 'md:w-20' : 'md:w-64'}
-        `}
-      >
-        {/* Sidebar Header */}
-        <div className={`h-20 flex items-center justify-between border-b border-slate-100 relative group px-6 ${isSidebarCollapsed ? 'md:justify-center md:px-2' : ''}`}>
-          <a href="/admin/dashboard" className="flex items-center gap-2.5">
-            <img 
-              src="/logo.png" 
-              alt="Color Hut" 
-              className={`object-contain transition-all duration-300 ${isSidebarCollapsed ? 'md:h-6' : 'h-8'}`} 
-            />
-          </a>
-
-          {/* Sidebar Collapse Toggle */}
-          <button 
-            onClick={toggleSidebar}
-            className={`absolute -right-3 top-1/2 -translate-y-1/2 bg-white border border-slate-200 rounded-full p-1.5 shadow-sm text-slate-400 hover:text-brand-500 hover:border-brand-300 transition-all duration-300 md:block hidden
-              ${isSidebarCollapsed ? 'rotate-180' : 'opacity-0 group-hover:opacity-100'}
-            `}
-          >
-            <ChevronLeft className="w-3.5 h-3.5" />
-          </button>
-
-          {/* Close Sidebar Drawer (Mobile) */}
-          <button 
-            onClick={() => setIsMobileOpen(false)}
-            className="md:hidden p-1 bg-slate-50 border border-slate-200 rounded-lg text-slate-400 hover:text-slate-600"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Sidebar Links Navigation */}
-        <nav className="flex-1 py-6 overflow-y-auto space-y-1 overflow-x-hidden">
-          {/* Overview List */}
-          <div className="mb-6">
-            <p className={`text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 whitespace-nowrap ${isSidebarCollapsed ? 'text-center px-4' : 'px-8'}`}>
-              {isSidebarCollapsed ? '•••' : 'Overview'}
-            </p>
-            {sidebarLinks.overview.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                className={`relative flex items-center py-3 text-sm font-bold transition-all duration-300 group ${
-                  isSidebarCollapsed ? 'justify-center px-0' : 'px-8'
-                } ${
-                  link.active 
-                    ? 'text-orange-600 bg-linear-to-r from-orange-50/50 to-white border-r-[3px] border-orange-600' 
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-orange-600 hover:pl-10'
-                }`}
-                title={link.name}
-              >
-                <link.icon className="w-5 h-5 shrink-0" />
-                <span className={`ml-3 whitespace-nowrap transition-opacity duration-300 ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
-                  {link.name}
-                </span>
-              </a>
-            ))}
-          </div>
-
-          {/* Management List */}
-          <div>
-            <p className={`text-[10px] font-black uppercase tracking-widest text-slate-400 mb-4 whitespace-nowrap ${isSidebarCollapsed ? 'text-center px-4' : 'px-8'}`}>
-              {isSidebarCollapsed ? '•••' : 'Management'}
-            </p>
-            {sidebarLinks.management.map((link) => (
-              <a
-                key={link.name}
-                href={link.href}
-                className={`relative flex items-center py-3 text-sm font-bold transition-all duration-300 group ${
-                  isSidebarCollapsed ? 'justify-center px-0' : 'px-8'
-                } ${
-                  link.active 
-                    ? 'text-orange-600 bg-linear-to-r from-orange-50/50 to-white border-r-[3px] border-orange-600' 
-                    : 'text-slate-500 hover:bg-slate-50 hover:text-orange-600 hover:pl-10'
-                }`}
-                title={link.name}
-              >
-                <link.icon className="w-5 h-5 shrink-0" />
-                <span className={`ml-3 whitespace-nowrap transition-opacity duration-300 ${isSidebarCollapsed ? 'md:hidden' : 'block'}`}>
-                  {link.name}
-                </span>
-              </a>
-            ))}
-          </div>
-        </nav>
-
-        {/* Sidebar Footer Profile */}
-        <div className="p-4 border-t border-slate-100/80">
-          <div className={`flex items-center mb-3 rounded-xl transition-colors hover:bg-slate-50 ${isSidebarCollapsed ? 'md:justify-center md:p-2' : 'px-3 py-2 gap-3'}`}>
-            <img 
-              src="https://ui-avatars.com/api/?name=Admin+User&background=f97316&color=fff"
-              className="w-8 h-8 rounded-full shrink-0" 
-              alt="Admin"
-            />
-            {!isSidebarCollapsed && (
-              <div className="text-left overflow-hidden">
-                <div className="text-slate-900 text-sm font-extrabold truncate">Admin User</div>
-                <div className="text-[10px] text-slate-400 uppercase font-black tracking-wider">Studio Manager</div>
-              </div>
-            )}
-          </div>
-          <a 
-            href="/admin/logout" 
-            className={`w-full flex items-center justify-center gap-2 py-2.5 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-xl transition-colors ${
-              isSidebarCollapsed ? 'md:px-0' : 'px-4'
-            }`}
-            title="Logout"
-          >
-            <LogOut className="w-4 h-4 shrink-0" />
-            <span className={`${isSidebarCollapsed ? 'md:hidden' : 'block'} whitespace-nowrap`}>Logout</span>
-          </a>
-        </div>
-      </aside>
+      <AdminSidebar />
 
       {/* Main Container Context */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
@@ -1649,13 +1558,20 @@ export default function ProductsPage() {
                       </tr>
                     ) : (
                        products.map((product, index) => {
-                        let parsedImages: string[] = [];
+                                                let parsedImages: string[] = [];
                         try {
                           parsedImages = product.image ? (product.image.startsWith('[') ? JSON.parse(product.image) : [product.image]) : [];
                         } catch (e) {
                           parsedImages = product.image ? [product.image] : [];
                         }
-                        const mainImage = parsedImages[0] || 'https://via.placeholder.com/100';
+                        let rawImg = parsedImages[0] || '';
+                        let mainImage = rawImg;
+                        if (rawImg && !rawImg.startsWith('http') && !rawImg.startsWith('data:')) {
+                          mainImage = rawImg.startsWith('/') ? (rawImg.startsWith('/uploads/') ? rawImg : '/uploads' + rawImg) : '/uploads/' + rawImg;
+                        }
+                        if (!mainImage) {
+                          mainImage = 'https://via.placeholder.com/100';
+                        }
 
                         return (
                           <tr 
@@ -1684,6 +1600,11 @@ export default function ProductsPage() {
                                     <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                                       #{product.id.toString().padStart(4, '0')}
                                     </div>
+                                    {Boolean((product.allow_buy_now === 1 || product.allow_buy_now === true || product.allow_buy_now === '1') && product.price) && (
+                                      <span className="text-[10px] font-extrabold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-md flex items-center gap-1">
+                                        ৳{Number(product.price).toLocaleString()} • Buy Now
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </div>
@@ -2284,13 +2205,13 @@ export default function ProductsPage() {
                                       onMouseDown={(e) => e.preventDefault()}
                                       onClick={() => {
                                         restoreSelection();
-                                        const imgHtml = `<img src="${url}" alt="Product Image" style="float: left; display: inline-block; margin: 10px 20px 10px 0; max-width: 100%; height: auto;" class="rounded-xl border border-slate-100 shadow-sm" />`;
+                                        const imgHtml = `<img src="${formatAdminImageUrl(url)}" alt="Product Image" style="float: left; display: inline-block; margin: 10px 20px 10px 0; max-width: 100%; height: auto;" class="rounded-xl border border-slate-100 shadow-sm" />`;
                                         execEditorCommand('insertHTML', imgHtml);
                                         setIsImageInsertOpen(false);
                                       }}
                                       className="aspect-square rounded-lg overflow-hidden border border-slate-200 hover:border-orange-500 hover:scale-105 active:scale-95 transition-all cursor-pointer"
                                     >
-                                      <img src={url} className="w-full h-full object-cover" alt="product" />
+                                      <img src={formatAdminImageUrl(url)} className="w-full h-full object-cover" alt="product" />
                                     </button>
                                   ))}
                                 </div>
@@ -2561,7 +2482,7 @@ export default function ProductsPage() {
                             className={`relative group/item aspect-square rounded-xl overflow-hidden shadow-sm border border-slate-100 cursor-move transition-all duration-200 ${draggedIndex === index ? 'opacity-50 border-2 border-dashed border-orange-500 scale-95' : ''}`}
                           >
                             <img 
-                              src={url} 
+                              src={formatAdminImageUrl(url)} 
                               className="w-full h-full object-cover pointer-events-none" 
                               alt="preview"
                             />
@@ -2596,6 +2517,64 @@ export default function ProductsPage() {
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Direct Checkout & Buy Now Option */}
+                <div className="md:col-span-2 bg-gradient-to-br from-orange-50/70 via-amber-50/40 to-white p-5 rounded-2xl border border-orange-200/80 shadow-xs">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-orange-600 text-white flex items-center justify-center shadow-md shadow-orange-500/25">
+                        <ShoppingCart className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          Direct Checkout & "Buy Now" Button
+                          {allowBuyNow && (
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
+                              Active
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-xs text-slate-500">Allow customers to buy this product directly on website with instant checkout</p>
+                      </div>
+                    </div>
+                    
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input 
+                        type="checkbox" 
+                        checked={allowBuyNow}
+                        onChange={(e) => setAllowBuyNow(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-orange-600"></div>
+                    </label>
+                  </div>
+
+                  {allowBuyNow && (
+                    <div className="mt-4 pt-4 border-t border-orange-200/60">
+                      <div className="max-w-md">
+                        <label className="block text-xs font-bold uppercase tracking-wider text-slate-800 mb-1.5">
+                          Product Price (BDT ৳) <span className="text-red-500">*</span>
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-base">৳</span>
+                          <input 
+                            type="number" 
+                            min="0"
+                            step="0.01"
+                            required={allowBuyNow}
+                            value={productPrice}
+                            onChange={(e) => setProductPrice(e.target.value)}
+                            placeholder="e.g. 1190"
+                            className="w-full bg-white border border-orange-300 rounded-xl py-2.5 pl-8 pr-4 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 text-slate-900 font-black text-base shadow-xs"
+                          />
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-1.5 font-medium">
+                          The product details page will display this price and a "Buy Now" button next to WhatsApp inquiry.
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Optional Video link */}
