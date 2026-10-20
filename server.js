@@ -436,6 +436,8 @@ db.getConnection((err, connection) => {
             email VARCHAR(255) NOT NULL UNIQUE,
             password VARCHAR(255) NOT NULL,
             role ENUM('admin', 'user') DEFAULT 'user',
+            access_permissions TEXT NULL,
+            status VARCHAR(50) DEFAULT 'Active',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     `;
@@ -463,6 +465,7 @@ db.getConnection((err, connection) => {
             category_id VARCHAR(255),
             description TEXT,
             price DECIMAL(10, 2),
+            allow_buy_now BOOLEAN DEFAULT FALSE,
             image TEXT,
             video_url VARCHAR(500),
             status ENUM('Published', 'Draft') DEFAULT 'Draft',
@@ -475,6 +478,29 @@ db.getConnection((err, connection) => {
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             is_deleted BOOLEAN DEFAULT FALSE,
             deleted_at TIMESTAMP NULL
+        )
+    `;
+
+    const createOrdersTable = `
+        CREATE TABLE IF NOT EXISTS orders (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            order_number VARCHAR(50) UNIQUE NOT NULL,
+            customer_name VARCHAR(150) NOT NULL,
+            customer_phone VARCHAR(50) NOT NULL,
+            customer_email VARCHAR(150),
+            shipping_address TEXT NOT NULL,
+            city VARCHAR(100) DEFAULT 'Dhaka',
+            delivery_zone ENUM('inside_dhaka', 'outside_dhaka') DEFAULT 'inside_dhaka',
+            order_notes TEXT,
+            payment_method ENUM('cod', 'bkash', 'nagad', 'card') DEFAULT 'cod',
+            payment_status ENUM('pending', 'paid', 'failed') DEFAULT 'pending',
+            order_status ENUM('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
+            subtotal DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+            shipping_fee DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+            total_amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+            items_json LONGTEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         )
     `;
 
@@ -553,6 +579,18 @@ db.getConnection((err, connection) => {
     // Add slug if it doesn't exist (Migration)
     const addSlugColumn = `ALTER TABLE products ADD COLUMN slug VARCHAR(255) AFTER name`;
 
+    // Add price if it doesn't exist (Migration)
+    const addPriceColumn = `ALTER TABLE products ADD COLUMN price DECIMAL(10,2) NULL`;
+
+    // Add allow_buy_now if it doesn't exist (Migration)
+    const addAllowBuyNowColumn = `ALTER TABLE products ADD COLUMN allow_buy_now BOOLEAN DEFAULT FALSE`;
+
+    // Add access_permissions to users if it doesn't exist (Migration)
+    const addAccessPermissionsColumn = `ALTER TABLE users ADD COLUMN access_permissions TEXT NULL`;
+
+    // Add status to users if it doesn't exist (Migration)
+    const addUserStatusColumn = `ALTER TABLE users ADD COLUMN status VARCHAR(50) DEFAULT 'Active'`;
+
     // Add parent_id if it doesn't exist (Migration)
     const addParentIdColumn = `ALTER TABLE categories ADD COLUMN parent_id INT DEFAULT NULL AFTER id`;
 
@@ -578,12 +616,17 @@ db.getConnection((err, connection) => {
         if (err) console.error('Error creating users table:', err);
         else {
             console.log('Users table ready');
-            // Seed Admin User
-            connection.query('SELECT * FROM users WHERE email = ?', ['admin@colorhut.com'], async (err, results) => {
-                if (results && results.length === 0) {
-                    const hashedPassword = await bcrypt.hash('admin123', saltRounds);
-                    connection.query('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)', ['Admin User', 'admin@colorhut.com', hashedPassword, 'admin']);
-                }
+            // Migration: users columns
+            connection.query(addAccessPermissionsColumn, () => {
+                connection.query(addUserStatusColumn, () => {
+                    // Seed Admin User
+                    connection.query('SELECT * FROM users WHERE email = ?', ['admin@colorhut.com'], async (err, results) => {
+                        if (results && results.length === 0) {
+                            const hashedPassword = await bcrypt.hash('admin123', saltRounds);
+                            connection.query('INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)', ['Admin User', 'admin@colorhut.com', hashedPassword, 'admin']);
+                        }
+                    });
+                });
             });
 
             // Create Categories next
@@ -597,70 +640,79 @@ db.getConnection((err, connection) => {
                             if (err) console.error('Error creating products table:', err);
                             else {
                                 console.log('Products table ready');
-                                connection.query(addSeoKeywordsColumn, () => {
-                                    connection.query(addSeoDescriptionColumn, () => {
-                                        connection.query(addPositionColumn, () => {
-                                            connection.query(addIsPinnedColumn, () => {
-                                                connection.query(addSlugColumn, () => {
-                                                    // Sync product slugs
-                                                    connection.query("SELECT id, name FROM products WHERE slug IS NULL OR slug = ''", (err, rows) => {
-                                                        if (!err && rows) {
-                                                            rows.forEach(row => {
-                                                                const slug = generateSlug(row.name);
-                                                                connection.query('UPDATE products SET slug = ? WHERE id = ?', [slug, row.id]);
+                                connection.query(addPriceColumn, () => {
+                                    connection.query(addAllowBuyNowColumn, () => {
+                                        connection.query(addSeoKeywordsColumn, () => {
+                                            connection.query(addSeoDescriptionColumn, () => {
+                                                connection.query(addPositionColumn, () => {
+                                                    connection.query(addIsPinnedColumn, () => {
+                                                        connection.query(addSlugColumn, () => {
+                                                            // Sync product slugs
+                                                            connection.query("SELECT id, name FROM products WHERE slug IS NULL OR slug = ''", (err, rows) => {
+                                                                if (!err && rows) {
+                                                                    rows.forEach(row => {
+                                                                        const slug = generateSlug(row.name);
+                                                                        connection.query('UPDATE products SET slug = ? WHERE id = ?', [slug, row.id]);
+                                                                    });
+                                                                }
                                                             });
-                                                        }
-                                                    });
 
-                                                    // Create Settings & Traffic
-                                                    connection.query(createSettingsTable, () => {
-                                                        connection.query(createCategoryParentsTable, (err) => {
-                                                            if (err) console.error('Error creating category_parents table:', err);
+                                                            // Create Settings & Traffic
+                                                            connection.query(createSettingsTable, () => {
+                                                                connection.query(createCategoryParentsTable, (err) => {
+                                                                    if (err) console.error('Error creating category_parents table:', err);
 
-                                                            // Migration: Move existing parent_id relationships to category_parents
-                                                            const migrateParents = `
-                                                            INSERT IGNORE INTO category_parents (category_id, parent_id)
-                                                            SELECT id, parent_id FROM categories WHERE parent_id IS NOT NULL;
-                                                        `;
-                                                            connection.query(migrateParents, (err) => {
-                                                                if (err) console.error('Error migrating category parents:', err);
-                                                            });
-                                                        });
-
-                                                        connection.query(createTrafficLogsTable, () => {
-                                                            connection.query(createHeroSlidesTable, (err) => {
-                                                                if (err) console.error('Error creating hero_slides table:', err);
-
-                                                                // Create Meeting Requests Table
-                                                                const createMeetingRequestsTable = `
-                                                                    CREATE TABLE IF NOT EXISTS meeting_requests (
-                                                                        id INT AUTO_INCREMENT PRIMARY KEY,
-                                                                        business_type VARCHAR(50),
-                                                                        business_name VARCHAR(255),
-                                                                        full_name VARCHAR(255),
-                                                                        designation VARCHAR(255),
-                                                                        whatsapp_number VARCHAR(50),
-                                                                        menu_type VARCHAR(50),
-                                                                        address TEXT,
-                                                                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                                                                    )
+                                                                    // Migration: Move existing parent_id relationships to category_parents
+                                                                    const migrateParents = `
+                                                                    INSERT IGNORE INTO category_parents (category_id, parent_id)
+                                                                    SELECT id, parent_id FROM categories WHERE parent_id IS NOT NULL;
                                                                 `;
-                                                                connection.query(createMeetingRequestsTable, (err) => {
-                                                                    if (err) console.error('Error creating meeting_requests table:', err);
-                                                                });
-
-                                                                // Run index migrations
-                                                                addIndexes.forEach(idxQuery => {
-                                                                    connection.query(idxQuery, (err) => {
-                                                                        if (err && !err.message.includes('Duplicate key name')) {
-                                                                            // console.error('Index Error:', err.message);
-                                                                        }
+                                                                    connection.query(migrateParents, (err) => {
+                                                                        if (err) console.error('Error migrating category parents:', err);
                                                                     });
                                                                 });
-                                                                console.log('Database Initialization Complete.');
-                                                                // Initial Sitemap Generation
-                                                                updateMySitemapFile();
-                                                                connection.release();
+
+                                                                connection.query(createTrafficLogsTable, () => {
+                                                                    connection.query(createHeroSlidesTable, (err) => {
+                                                                        if (err) console.error('Error creating hero_slides table:', err);
+
+                                                                        // Create Orders Table
+                                                                        connection.query(createOrdersTable, (err) => {
+                                                                            if (err) console.error('Error creating orders table:', err);
+                                                                        });
+
+                                                                        // Create Meeting Requests Table
+                                                                        const createMeetingRequestsTable = `
+                                                                            CREATE TABLE IF NOT EXISTS meeting_requests (
+                                                                                id INT AUTO_INCREMENT PRIMARY KEY,
+                                                                                business_type VARCHAR(50),
+                                                                                business_name VARCHAR(255),
+                                                                                full_name VARCHAR(255),
+                                                                                designation VARCHAR(255),
+                                                                                whatsapp_number VARCHAR(50),
+                                                                                menu_type VARCHAR(50),
+                                                                                address TEXT,
+                                                                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                                                                            )
+                                                                        `;
+                                                                        connection.query(createMeetingRequestsTable, (err) => {
+                                                                            if (err) console.error('Error creating meeting_requests table:', err);
+                                                                        });
+
+                                                                        // Run index migrations
+                                                                        addIndexes.forEach(idxQuery => {
+                                                                            connection.query(idxQuery, (err) => {
+                                                                                if (err && !err.message.includes('Duplicate key name')) {
+                                                                                    // console.error('Index Error:', err.message);
+                                                                                }
+                                                                            });
+                                                                        });
+                                                                        console.log('Database Initialization Complete.');
+                                                                        // Initial Sitemap Generation
+                                                                        updateMySitemapFile();
+                                                                        connection.release();
+                                                                    });
+                                                                });
                                                             });
                                                         });
                                                     });
