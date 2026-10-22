@@ -20,6 +20,7 @@ import {
   Sparkles,
   AlertCircle
 } from 'lucide-react';
+import { trackInitiateCheckout, trackPurchase } from '@/app/lib/analytics';
 
 interface CartItem {
   id: number;
@@ -105,6 +106,7 @@ function CheckoutContent() {
       .then(data => {
         setProduct(data);
         setLoading(false);
+        trackInitiateCheckout([{ product_id: data.id, name: data.name, price: data.price, quantity }], Number(data.price || 0) * quantity);
       })
       .catch(err => {
         console.error(err);
@@ -208,6 +210,16 @@ function CheckoutContent() {
         shippingAddress,
         deliveryZone,
         paymentMethod,
+        items: orderPayload.items
+      });
+
+      trackPurchase({
+        orderNumber: data.orderNumber,
+        totalAmount: data.totalAmount,
+        customerName,
+        customerPhone,
+        customerEmail,
+        city: deliveryZone === 'outside_dhaka' ? 'Outside Dhaka' : 'Dhaka',
         items: orderPayload.items
       });
       window.scrollTo({ top: 0, behavior: 'smooth' });

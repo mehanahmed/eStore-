@@ -14,6 +14,7 @@ import {
   Calendar,
   MessageSquare,
   Settings,
+  Globe,
   UserCog,
   HeartHandshake,
   Store,
@@ -103,7 +104,8 @@ export default function AdminSidebar() {
   ];
 
   const accountItems: NavItem[] = [
-    { name: 'Settings', href: '/admin/seo', icon: Settings },
+    { name: 'Settings', href: '/admin/settings', icon: Settings },
+    { name: 'SEO & Social', href: '/admin/seo', icon: Globe },
     { name: 'Manage Users', href: '/admin/manage-users', icon: UserCog },
     { name: 'Testimonials', href: '/admin/testimonials', icon: HeartHandshake }
   ];

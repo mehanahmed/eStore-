@@ -19,6 +19,7 @@ import {
     ChevronRight as LucideChevronRight
 } from 'lucide-react';
 import { FaShieldHalved, FaTruckFast, FaBoxesPacking, FaHeadset } from 'react-icons/fa6';
+import { trackViewContent, trackAddToCart, trackInitiateCheckout } from '@/app/lib/analytics';
 
 // === ICONS ===
 const YouTubeIcon = () => (
@@ -669,6 +670,7 @@ export default function ProductDetailPage() {
                 if (!res.ok) throw new Error('Product not found');
                 const data = await res.json();
                 setProduct(data);
+                trackViewContent(data);
 
                 // Document title updates
                 document.title = `${data.name} | Color Hut Studio`;
@@ -1777,6 +1779,10 @@ export default function ProductDetailPage() {
                             {Boolean(product.allow_buy_now && product.price) && (
                                 <a
                                     href={`/checkout/?product=${product.id}&qty=${quantity}`}
+                                    onClick={() => {
+                                        trackAddToCart(product, quantity);
+                                        trackInitiateCheckout([{ product_id: product.id, name: product.name, price: product.price, quantity }], Number(product.price || 0) * quantity);
+                                    }}
                                     className="flex-1 min-w-[190px] bg-[#ea580c] hover:bg-[#c2410c] text-white px-6 py-4 rounded-xl text-base font-extrabold shadow-lg shadow-orange-500/25 hover:shadow-orange-500/40 hover:-translate-y-0.5 active:scale-98 transition-all flex items-center justify-center gap-2.5 text-center cursor-pointer"
                                 >
                                     <ShoppingBag className="w-5 h-5 text-white" />

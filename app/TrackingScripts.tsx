@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import Script from 'next/script';
 import { usePathname } from 'next/navigation';
+import { trackPageView } from './lib/analytics';
 
 export function TrackingHead() {
     const [config, setConfig] = useState<{
@@ -15,7 +16,18 @@ export function TrackingHead() {
     useEffect(() => {
         fetch('/api/public/config')
             .then(res => res.json())
-            .then(data => setConfig(data))
+            .then(data => {
+                setConfig(data);
+                // Immediately capture fbclid into _fbc cookie if arriving from a Meta ad
+                if (typeof window !== 'undefined') {
+                    const params = new URLSearchParams(window.location.search);
+                    const fbclid = params.get('fbclid');
+                    if (fbclid) {
+                        const fbc = `fb.1.${Date.now()}.${fbclid}`;
+                        document.cookie = `_fbc=${fbc}; path=/; max-age=${90 * 24 * 3600}; SameSite=Lax`;
+                    }
+                }
+            })
             .catch(err => console.error('Failed to load tracking config:', err));
     }, []);
 
@@ -23,7 +35,20 @@ export function TrackingHead() {
 
     return (
         <>
-            {/* Meta Pixel */}
+            {/* Google Tag Manager Header Script */}
+            {config.gtm_enabled && config.gtm_id && (
+                <Script id="gtm-script" strategy="afterInteractive">
+                    {`
+                        (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+                        new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+                        j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+                        'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+                        })(window,document,'script','dataLayer','${config.gtm_id}');
+                    `}
+                </Script>
+            )}
+
+            {/* Meta Pixel Base Code (PageView is deduplicated via CAPI + browser eventID) */}
             {config.pixel_enabled && config.pixel_id && (
                 <Script id="fb-pixel" strategy="afterInteractive">
                     {`
@@ -36,12 +61,9 @@ export function TrackingHead() {
                         s.parentNode.insertBefore(t,s)}(window, document,'script',
                         'https://connect.facebook.net/en_US/fbevents.js');
                         fbq('init', '${config.pixel_id}');
-                        fbq('track', 'PageView');
                     `}
                 </Script>
             )}
-
-
         </>
     );
 }
@@ -65,6 +87,18 @@ export function TrackingBody() {
 
     return (
         <>
+            {/* Google Tag Manager (noscript fallback) */}
+            {config.gtm_enabled && config.gtm_id && (
+                <noscript>
+                    <iframe
+                        src={`https://www.googletagmanager.com/ns.html?id=${config.gtm_id}`}
+                        height="0"
+                        width="0"
+                        style={{ display: 'none', visibility: 'hidden' }}
+                    />
+                </noscript>
+            )}
+
             {/* Meta Pixel Noscript */}
             {config.pixel_enabled && config.pixel_id && (
                 <noscript>
@@ -76,8 +110,6 @@ export function TrackingBody() {
                     />
                 </noscript>
             )}
-
-
         </>
     );
 }
@@ -98,7 +130,17 @@ export function TrafficTracker() {
             localStorage.setItem('utm_campaign', utm);
         }
 
-        // 2. Fetch public meeting settings (IP checking + campaign config)
+        // 2. Capture fbclid to _fbc cookie immediately if arriving from Meta ads
+        const fbclid = params.get('fbclid');
+        if (fbclid) {
+            const fbc = `fb.1.${Date.now()}.${fbclid}`;
+            document.cookie = `_fbc=${fbc}; path=/; max-age=${90 * 24 * 3600}; SameSite=Lax`;
+        }
+
+        // 3. Dispatch Deduplicated PageView to Browser Pixel, GTM, and Server CAPI
+        trackPageView(pathname);
+
+        // 4. Fetch public meeting settings (IP checking + campaign config)
         const checkMeetingStatus = async () => {
             try {
                 const activeUtm = utm || localStorage.getItem('utm_campaign') || '';
@@ -125,7 +167,7 @@ export function TrafficTracker() {
         };
         checkMeetingStatus();
 
-        // 3. Track visit
+        // 5. Track visit
         const trackVisit = async () => {
             try {
                 const fullPath = window.location.pathname + window.location.search;
@@ -147,7 +189,7 @@ export function TrafficTracker() {
         trackVisit();
     }, [pathname]);
 
-    // 4. Persistence of UTM parameter across clicks and programmatic transitions
+    // 6. Persistence of UTM parameter across clicks and programmatic transitions
     useEffect(() => {
         if (typeof window === 'undefined') return;
 

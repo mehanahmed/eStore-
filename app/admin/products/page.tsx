@@ -51,7 +51,9 @@ import {
   Palette,
   Highlighter,
   Video,
-  ShoppingCart
+  ShoppingCart,
+  Sparkles,
+  Flame
 } from 'lucide-react';
 
 const PRODUCTS_PER_PAGE = 30;
@@ -72,6 +74,7 @@ interface Product {
   is_pinned: boolean | number;
   price?: number | string | null;
   allow_buy_now?: boolean | number | string | null;
+  is_menu_product?: boolean | number | string | null;
 }
 
 interface Category {
@@ -224,6 +227,9 @@ export default function ProductsPage() {
   const [productIsPinned, setProductIsPinned] = useState(0);
   const [allowBuyNow, setAllowBuyNow] = useState(false);
   const [productPrice, setProductPrice] = useState('');
+  const [isMenuProduct, setIsMenuProduct] = useState(false);
+  const [menuFilterOnly, setMenuFilterOnly] = useState(false);
+  const [totalMenuProducts, setTotalMenuProducts] = useState(0);
 
   // Modal editor preview mode
   const [isPreviewMode, setIsPreviewMode] = useState(false);
@@ -328,7 +334,7 @@ export default function ProductsPage() {
   // Load Products list API (paged — 30 per page)
   const loadProducts = async (
     pageToFetch = activePage,
-    currentFilters = { category: categoryFilter, status: statusFilter, search: searchQuery }
+    currentFilters: { category: string; status: string; search: string; menu?: boolean } = { category: categoryFilter, status: statusFilter, search: searchQuery, menu: menuFilterOnly }
   ) => {
     if (isProductsLoading) return;
     setIsProductsLoading(true);
@@ -338,6 +344,7 @@ export default function ProductsPage() {
       if (currentFilters.category !== 'all') url += `&category=${currentFilters.category}`;
       if (currentFilters.status !== 'all') url += `&status=${currentFilters.status}`;
       if (currentFilters.search) url += `&search=${encodeURIComponent(currentFilters.search)}`;
+      if (currentFilters.menu) url += `&menu=true`;
 
       const response = await fetch(url);
       const data = await response.json();
@@ -353,6 +360,9 @@ export default function ProductsPage() {
         });
         setProducts(uniqueProducts);
         setTotalProducts(data.total || 0);
+        if (typeof data.totalMenuProducts === 'number') {
+          setTotalMenuProducts(data.totalMenuProducts);
+        }
         setActivePage(data.page || pageToFetch);
       }
     } catch (error) {
@@ -366,7 +376,7 @@ export default function ProductsPage() {
   const goToPage = (page: number) => {
     if (page < 1 || page > Math.max(1, Math.ceil(totalProducts / PRODUCTS_PER_PAGE))) return;
     if (page === activePage && products.length > 0) return;
-    loadProducts(page);
+    loadProducts(page, { category: categoryFilter, status: statusFilter, search: searchQuery, menu: menuFilterOnly });
   };
 
   // Sync category filter options
@@ -401,9 +411,9 @@ export default function ProductsPage() {
 
   // Handle filter changes — always restart from page 1
   useEffect(() => {
-    loadProducts(1, { category: categoryFilter, status: statusFilter, search: searchQuery });
+    loadProducts(1, { category: categoryFilter, status: statusFilter, search: searchQuery, menu: menuFilterOnly });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categoryFilter, statusFilter, searchQuery]);
+  }, [categoryFilter, statusFilter, searchQuery, menuFilterOnly]);
 
   // Initial Load
   useEffect(() => {
@@ -469,6 +479,7 @@ export default function ProductsPage() {
     setProductIsPinned(0);
     setAllowBuyNow(false);
     setProductPrice('');
+    setIsMenuProduct(false);
     setIsPreviewMode(false);
     setCatSearchQuery('');
     setIsModalOpen(true);
@@ -492,6 +503,8 @@ export default function ProductsPage() {
     const isBuyNow = product.allow_buy_now === 1 || product.allow_buy_now === true || product.allow_buy_now === '1';
     setAllowBuyNow(Boolean(isBuyNow));
     setProductPrice(product.price !== undefined && product.price !== null && product.price !== '' ? String(product.price) : '');
+    const isMenu = product.is_menu_product === 1 || product.is_menu_product === true || product.is_menu_product === '1';
+    setIsMenuProduct(Boolean(isMenu));
     setIsPreviewMode(false);
     setCatSearchQuery('');
 
@@ -1275,7 +1288,8 @@ export default function ProductsPage() {
       seo_keywords: productSeoKeywords,
       seo_description: productSeoDescription,
       position: productPosition,
-      is_pinned: productIsPinned === 1
+      is_pinned: productIsPinned === 1,
+      is_menu_product: isMenuProduct ? 1 : 0
     };
 
     try {
@@ -1348,6 +1362,43 @@ export default function ProductsPage() {
         prev.map(p => p.id === product.id ? { ...p, is_pinned: originalStatus } : p)
       );
       showToast('Connection error updating pin.', 'error');
+    }
+  };
+
+  // Toggles the Header "Hot Deal" status
+  const handleToggleMenuProduct = async (product: Product) => {
+    const isCurrent = Boolean(product.is_menu_product === 1 || product.is_menu_product === true || product.is_menu_product === '1');
+    const nextStatus = isCurrent ? 0 : 1;
+
+    // Optimistically update
+    setProducts(prev => 
+      prev.map(p => p.id === product.id ? { ...p, is_menu_product: nextStatus } : p)
+    );
+    setTotalMenuProducts(prev => nextStatus ? prev + 1 : Math.max(0, prev - 1));
+
+    try {
+      const response = await fetch(`/api/products/${product.id}/toggle-menu`, {
+        method: 'PUT'
+      });
+
+      if (response.ok) {
+        showToast(nextStatus ? "Added to 'Hot Deals'!" : "Removed from 'Hot Deals'!");
+      } else {
+        // Revert
+        setProducts(prev => 
+          prev.map(p => p.id === product.id ? { ...p, is_menu_product: product.is_menu_product } : p)
+        );
+        setTotalMenuProducts(prev => nextStatus ? Math.max(0, prev - 1) : prev + 1);
+        showToast('Failed to update product menu status.', 'error');
+      }
+    } catch (error) {
+      console.error('Error toggling menu product:', error);
+      // Revert
+      setProducts(prev => 
+        prev.map(p => p.id === product.id ? { ...p, is_menu_product: product.is_menu_product } : p)
+      );
+      setTotalMenuProducts(prev => nextStatus ? Math.max(0, prev - 1) : prev + 1);
+      showToast('Connection error updating status.', 'error');
     }
   };
 
@@ -1480,7 +1531,21 @@ export default function ProductsPage() {
                   />
                 </div>
 
-                <div className="flex flex-col sm:flex-row gap-4">
+                <div className="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
+                  <button
+                    type="button"
+                    onClick={() => setMenuFilterOnly(!menuFilterOnly)}
+                    className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 border w-full sm:w-auto justify-center ${
+                      menuFilterOnly
+                        ? 'bg-rose-500 text-white border-rose-500 shadow-md shadow-rose-500/20'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                    }`}
+                    title="Filter only products featured in the Hot Deals section"
+                  >
+                    <Flame className={`w-3.5 h-3.5 ${menuFilterOnly ? 'text-white' : 'text-rose-500 fill-rose-500'}`} />
+                    <span>Hot Deals ({totalMenuProducts})</span>
+                  </button>
+
                   <ModernDropdown 
                     value={categoryFilter}
                     onChange={setCategoryFilter}
@@ -1553,6 +1618,22 @@ export default function ProductsPage() {
                         >
                           <Pin className="w-4 h-4" fill={product.is_pinned ? 'currentColor' : 'none'} />
                         </button>
+                        {/* Toggle Hot Deals Feature */}
+                        <button
+                          onClick={() => handleToggleMenuProduct(product)}
+                          title={
+                            Boolean(product.is_menu_product === 1 || product.is_menu_product === true || product.is_menu_product === '1')
+                              ? "Featured in 'Hot Deals' (Click to remove)"
+                              : "Click to feature in 'Hot Deals'"
+                          }
+                          className={`absolute top-2 right-10 p-1.5 rounded-lg bg-white/95 backdrop-blur-sm shadow-sm transition-all flex items-center justify-center ${
+                            Boolean(product.is_menu_product === 1 || product.is_menu_product === true || product.is_menu_product === '1')
+                              ? 'text-rose-600 font-bold ring-1 ring-rose-500 bg-rose-50/95'
+                              : 'text-slate-300 hover:text-slate-500'
+                          }`}
+                        >
+                          <Flame className="w-4 h-4" fill={Boolean(product.is_menu_product === 1 || product.is_menu_product === true || product.is_menu_product === '1') ? 'currentColor' : 'none'} />
+                        </button>
                         <span className={`absolute bottom-2 left-2 ${product.status === 'Published' ? 'bg-emerald-500/90 text-white' : 'bg-amber-500/90 text-white'} backdrop-blur-sm font-bold text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-md shadow-sm`}>
                           {product.status}
                         </span>
@@ -1568,6 +1649,12 @@ export default function ProductsPage() {
                           <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-full">
                             {product.category_name || 'Uncategorized'}
                           </span>
+                          {Boolean(product.is_menu_product === 1 || product.is_menu_product === true || product.is_menu_product === '1') && (
+                            <span className="text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-200/90 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                              <Flame className="w-2.5 h-2.5 fill-rose-600 text-rose-600" />
+                              Hot Deal
+                            </span>
+                          )}
                           {Boolean((product.allow_buy_now === 1 || product.allow_buy_now === true || product.allow_buy_now === '1') && product.price) && (
                             <span className="text-[10px] font-extrabold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-md">
                               ৳{Number(product.price).toLocaleString()}
@@ -2587,6 +2674,38 @@ export default function ProductsPage() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Feature in Hot Deals */}
+                <div className="md:col-span-2 bg-gradient-to-br from-rose-50/70 via-amber-50/40 to-white p-5 rounded-2xl border border-rose-200/80 shadow-xs">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-600 flex items-center justify-center">
+                        <Flame className="w-5 h-5 fill-rose-500 text-rose-500" />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                          Feature in "Hot Deals" Section
+                          {isMenuProduct && (
+                            <span className="text-[10px] font-extrabold uppercase tracking-wider text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">
+                              Active
+                            </span>
+                          )}
+                        </h4>
+                        <p className="text-xs text-slate-500">Show this product on the public Hot Deals showcase page linked from the header</p>
+                      </div>
+                    </div>
+                    
+                    <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                      <input 
+                        type="checkbox" 
+                        checked={isMenuProduct}
+                        onChange={(e) => setIsMenuProduct(e.target.checked)}
+                        className="sr-only peer"
+                      />
+                      <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-rose-500"></div>
+                    </label>
+                  </div>
                 </div>
 
                 {/* Section: SEO & Meta */}

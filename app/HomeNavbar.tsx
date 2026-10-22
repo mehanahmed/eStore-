@@ -63,9 +63,16 @@ const PlayCircleIcon = () => (
     </svg>
 );
 
+const FlameIcon = () => (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" stroke="none" className="text-rose-500">
+        <path d="M12 23c-4.97 0-9-3.8-9-8.5 0-3.1 1.63-5.77 3.5-7.5.34-.31.87-.2 1.05.23.47 1.11 1.25 2.11 2.2 2.77.3.21.71.02.76-.34.33-2.3 1.6-4.5 3.32-6.07.36-.33.93-.16 1.05.3 1.05 4.02 5.12 6.07 5.12 10.61 0 4.7-4.03 8.5-8 8.5z"/>
+    </svg>
+);
+
 // === SUB NAV (hardcoded) ===
 const SUB_NAV = [
     { label: 'All Products', href: '/all/', icon: 'grid' as const },
+    { label: 'Hot Deal', href: '/hot-deals/', icon: null },
     { label: 'Restaurant', href: '/restaurant/', icon: null },
     { label: 'Parlour', href: '/parlour/', icon: null },
     { label: 'Interior', href: '/interior/', icon: null },
@@ -342,7 +349,9 @@ export default function HomeNavbar({
                 {/* --- SUBNAV (hardcoded) --- */}
                 <nav className="store-subnav" ref={subNavRef as any}>
                     {SUB_NAV.map((item) => {
-                        const isActive = pathname === item.href || pathname?.startsWith(item.href.replace(/\/$/, ''));
+                        const isActive = item.href === '/hot-deals/'
+                            ? (pathname === '/hot-deals' || pathname === '/hot-deals/' || pathname === '/hot-deal' || pathname === '/hot-deal/' || pathname === '/product' || pathname === '/product/' || pathname === '/products' || pathname === '/products/')
+                            : (pathname === item.href || pathname?.startsWith(item.href.replace(/\/$/, '')));
                         return (
                             <a
                                 key={item.href}
@@ -351,6 +360,7 @@ export default function HomeNavbar({
                             >
                                 {item.icon === 'grid' && <GridIcon />}
                                 {item.icon === 'play' && <PlayCircleIcon />}
+                                {item.icon === 'flame' && <FlameIcon />}
                                 {item.label}
                             </a>
                         );
