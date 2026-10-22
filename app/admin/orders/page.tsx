@@ -59,8 +59,7 @@ export default function OrdersAdminPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
 
-  // Delivery Charges Setting Modal State
-  const [deliveryModalOpen, setDeliveryModalOpen] = useState(false);
+  // Delivery Charges Setting State
   const [deliveryCharges, setDeliveryCharges] = useState({
     inside_dhaka: 70,
     outside_dhaka: 130
@@ -97,10 +96,7 @@ export default function OrdersAdminPage() {
       });
       if (res.ok) {
         setDeliverySaved(true);
-        setTimeout(() => {
-          setDeliverySaved(false);
-          setDeliveryModalOpen(false);
-        }, 1200);
+        setTimeout(() => setDeliverySaved(false), 1500);
       } else {
         alert('Failed to save delivery charges');
       }
@@ -206,15 +202,6 @@ export default function OrdersAdminPage() {
 
           <div className="flex items-center gap-2.5">
             <button
-              onClick={() => setDeliveryModalOpen(true)}
-              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold transition-all shadow-xs"
-              title="Set Delivery Charges for Inside & Outside Dhaka"
-            >
-              <Truck className="w-3.5 h-3.5 text-orange-600" />
-              <span>Delivery Charges (৳{deliveryCharges.inside_dhaka} / ৳{deliveryCharges.outside_dhaka})</span>
-            </button>
-
-            <button
               onClick={fetchOrders}
               className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-xs"
             >
@@ -250,6 +237,72 @@ export default function OrdersAdminPage() {
               <p className="text-2xl font-black text-emerald-600 mt-1">
                 {stats.delivered_count || 0}
               </p>
+            </div>
+          </div>
+
+          {/* Delivery Charges Settings */}
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5">
+            <div className="flex flex-col lg:flex-row lg:items-center gap-4">
+              <div className="flex items-center gap-3 lg:w-64 shrink-0">
+                <div className="w-11 h-11 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
+                  <Truck className="w-5 h-5 text-orange-600" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-slate-900">Delivery Charges</h3>
+                  <p className="text-[11px] text-slate-400 font-medium">Auto-applied at checkout by zone</p>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveDelivery} className="flex flex-col sm:flex-row sm:items-end gap-3 flex-1 lg:justify-end">
+                <div className="w-full sm:w-44">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Inside Dhaka
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={deliveryCharges.inside_dhaka}
+                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, inside_dhaka: Number(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-7 pr-3 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div className="w-full sm:w-44">
+                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
+                    Outside Dhaka
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={deliveryCharges.outside_dhaka}
+                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, outside_dhaka: Number(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-7 pr-3 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm transition-all"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={savingDelivery}
+                  className="flex items-center justify-center gap-2 h-[38px] px-5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-md shadow-orange-500/20 disabled:opacity-50 transition-all shrink-0"
+                >
+                  {savingDelivery ? (
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                  ) : deliverySaved ? (
+                    <Check className="w-3.5 h-3.5" />
+                  ) : (
+                    <Truck className="w-3.5 h-3.5" />
+                  )}
+                  <span>{deliverySaved ? 'Saved!' : savingDelivery ? 'Saving...' : 'Save Charges'}</span>
+                </button>
+              </form>
             </div>
           </div>
 
@@ -496,92 +549,6 @@ export default function OrdersAdminPage() {
           </div>
         )}
 
-        {/* Delivery Charges Settings Modal */}
-        {deliveryModalOpen && (
-          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
-              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
-                <div className="flex items-center gap-2.5">
-                  <div className="w-9 h-9 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
-                    <Truck className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-900 text-base">Delivery Charges</h3>
-                    <p className="text-xs text-slate-500">Checkout delivery fee settings</p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setDeliveryModalOpen(false)}
-                  className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <form onSubmit={handleSaveDelivery} className="space-y-4 pt-5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                    Inside Dhaka Delivery (৳)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={deliveryCharges.inside_dhaka}
-                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, inside_dhaka: Number(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-8 pr-4 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm"
-                      required
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Applied automatically when customer selects Inside Dhaka</p>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                    Outside Dhaka Delivery (৳)
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={deliveryCharges.outside_dhaka}
-                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, outside_dhaka: Number(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-8 pr-4 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm"
-                      required
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-400 mt-1">Applied automatically when customer selects Outside Dhaka</p>
-                </div>
-
-                <div className="pt-4 flex items-center justify-end gap-2.5 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => setDeliveryModalOpen(false)}
-                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-all"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={savingDelivery}
-                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-md shadow-orange-500/20 disabled:opacity-50 transition-all"
-                  >
-                    {savingDelivery ? (
-                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    ) : deliverySaved ? (
-                      <Check className="w-3.5 h-3.5 text-white" />
-                    ) : (
-                      <Truck className="w-3.5 h-3.5" />
-                    )}
-                    <span>{deliverySaved ? 'Saved Successfully!' : savingDelivery ? 'Saving...' : 'Save Delivery Charges'}</span>
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </main>
     </div>
   );

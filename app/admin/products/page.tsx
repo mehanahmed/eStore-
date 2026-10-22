@@ -13,7 +13,7 @@ import {
   Settings,
   Trash2,
   ChevronLeft,
-  Menu,
+  ChevronRight,
   X,
   LogOut,
   Loader2,
@@ -53,6 +53,8 @@ import {
   Video,
   ShoppingCart
 } from 'lucide-react';
+
+const PRODUCTS_PER_PAGE = 30;
 
 interface Product {
   id: number;
@@ -189,8 +191,8 @@ export default function ProductsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   
   // State variables for filters and pagination
-  const [currentPage, setCurrentPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
+  const [activePage, setActivePage] = useState(1);
+  const [totalProducts, setTotalProducts] = useState(0);
   const [isProductsLoading, setIsProductsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -206,7 +208,6 @@ export default function ProductsPage() {
 
   // Sidebar controls
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   // Form Fields State
   const [productId, setProductId] = useState<number | null>(null);
@@ -263,10 +264,8 @@ export default function ProductsPage() {
   const [isCropMode, setIsCropMode] = useState(false);
 
   // DOM Refs
-  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const sortableRef = useRef<any>(null);
-  const infiniteScrollTriggerRef = useRef<HTMLDivElement>(null);
-  const observerRef = useRef<IntersectionObserver | null>(null);
   const editorRef = useRef<HTMLDivElement>(null);
 
   // Load preferences from localStorage on mount
@@ -310,34 +309,32 @@ export default function ProductsPage() {
 
       if (!response.ok) {
         showToast('Sorting failed. Restoring original list.', 'error');
-        loadProducts(true, { category: categoryFilter, status: statusFilter, search: searchQuery });
+        loadProducts(activePage, { category: categoryFilter, status: statusFilter, search: searchQuery });
       } else {
         showToast('Products layout re-ordered successfully!');
       }
     } catch (e) {
       console.error('Reorder failed', e);
-      loadProducts(true, { category: categoryFilter, status: statusFilter, search: searchQuery });
+      loadProducts(activePage, { category: categoryFilter, status: statusFilter, search: searchQuery });
       showToast('Network error while reordering.', 'error');
     }
-  }, [categoryFilter, statusFilter, searchQuery]);
+  }, [activePage, categoryFilter, statusFilter, searchQuery]);
 
   const saveReorderedPositionsRef = useRef(saveReorderedPositions);
   useEffect(() => {
     saveReorderedPositionsRef.current = saveReorderedPositions;
   }, [saveReorderedPositions]);
 
-  // Load Products list API
+  // Load Products list API (paged — 30 per page)
   const loadProducts = async (
-    isInitial = false,
+    pageToFetch = activePage,
     currentFilters = { category: categoryFilter, status: statusFilter, search: searchQuery }
   ) => {
     if (isProductsLoading) return;
     setIsProductsLoading(true);
 
-    let pageToFetch = isInitial ? 1 : currentPage;
-
     try {
-      let url = `/api/products?page=${pageToFetch}&limit=20`;
+      let url = `/api/products?page=${pageToFetch}&limit=${PRODUCTS_PER_PAGE}`;
       if (currentFilters.category !== 'all') url += `&category=${currentFilters.category}`;
       if (currentFilters.status !== 'all') url += `&status=${currentFilters.status}`;
       if (currentFilters.search) url += `&search=${encodeURIComponent(currentFilters.search)}`;
@@ -346,31 +343,17 @@ export default function ProductsPage() {
       const data = await response.json();
 
       if (data.products) {
-        if (isInitial) {
-          const uniqueProducts: Product[] = [];
-          const seen = new Set<number>();
-          data.products.forEach((p: Product) => {
-            if (!seen.has(p.id)) {
-              seen.add(p.id);
-              uniqueProducts.push(p);
-            }
-          });
-          setProducts(uniqueProducts);
-        } else {
-          setProducts(prev => {
-            const seen = new Set<number>(prev.map(p => p.id));
-            const uniqueAppend: Product[] = [];
-            data.products.forEach((p: Product) => {
-              if (!seen.has(p.id)) {
-                seen.add(p.id);
-                uniqueAppend.push(p);
-              }
-            });
-            return [...prev, ...uniqueAppend];
-          });
-        }
-        setHasMore(data.hasMore);
-        setCurrentPage(isInitial ? 2 : pageToFetch + 1);
+        const uniqueProducts: Product[] = [];
+        const seen = new Set<number>();
+        data.products.forEach((p: Product) => {
+          if (!seen.has(p.id)) {
+            seen.add(p.id);
+            uniqueProducts.push(p);
+          }
+        });
+        setProducts(uniqueProducts);
+        setTotalProducts(data.total || 0);
+        setActivePage(data.page || pageToFetch);
       }
     } catch (error) {
       console.error('Error loading products:', error);
@@ -378,6 +361,12 @@ export default function ProductsPage() {
     } finally {
       setIsProductsLoading(false);
     }
+  };
+
+  const goToPage = (page: number) => {
+    if (page < 1 || page > Math.max(1, Math.ceil(totalProducts / PRODUCTS_PER_PAGE))) return;
+    if (page === activePage && products.length > 0) return;
+    loadProducts(page);
   };
 
   // Sync category filter options
@@ -410,9 +399,9 @@ export default function ProductsPage() {
     return options;
   }, [categories]);
 
-  // Handle filter changes
+  // Handle filter changes — always restart from page 1
   useEffect(() => {
-    loadProducts(true, { category: categoryFilter, status: statusFilter, search: searchQuery });
+    loadProducts(1, { category: categoryFilter, status: statusFilter, search: searchQuery });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryFilter, statusFilter, searchQuery]);
 
@@ -422,44 +411,21 @@ export default function ProductsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Setup infinite scroll
-  useEffect(() => {
-    if (isProductsLoading || !hasMore) return;
-
-    if (observerRef.current) observerRef.current.disconnect();
-
-    observerRef.current = new IntersectionObserver((entries) => {
-      if (entries[0].isIntersecting && hasMore && !isProductsLoading) {
-        loadProducts(false);
-      }
-    }, {
-      rootMargin: '200px'
-    });
-
-    const trigger = infiniteScrollTriggerRef.current;
-    if (trigger) observerRef.current.observe(trigger);
-
-    return () => {
-      if (observerRef.current) observerRef.current.disconnect();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isProductsLoading, hasMore, currentPage]);
-
   // Bind SortableJS
   useEffect(() => {
-    const tbody = tbodyRef.current;
-    if (!tbody || products.length === 0) return;
+    const list = listRef.current;
+    if (!list || products.length === 0) return;
 
     if (sortableRef.current) {
       sortableRef.current.destroy();
     }
 
-    sortableRef.current = Sortable.create(tbody, {
+    sortableRef.current = Sortable.create(list, {
       animation: 150,
       handle: '.drag-handle',
       ghostClass: 'bg-orange-50',
       onEnd: () => {
-        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const rows = Array.from(list.querySelectorAll('[data-id]'));
         const orders = rows.map((row, index) => ({
           id: parseInt((row as HTMLElement).dataset.id || '0'),
           position: index
@@ -1329,7 +1295,7 @@ export default function ProductsPage() {
             : 'New product listed in catalog successfully!'
         );
         
-        loadProducts(true, { category: categoryFilter, status: statusFilter, search: searchQuery });
+        loadProducts(productId ? activePage : 1, { category: categoryFilter, status: statusFilter, search: searchQuery });
 
         if (keepEditing) {
           handleOpenCreateModal();
@@ -1402,7 +1368,7 @@ export default function ProductsPage() {
 
       if (response.ok) {
         showToast('Product deleted successfully!');
-        loadProducts(true, { category: categoryFilter, status: statusFilter, search: searchQuery });
+        loadProducts(products.length === 1 && activePage > 1 ? activePage - 1 : activePage, { category: categoryFilter, status: statusFilter, search: searchQuery });
       } else {
         showToast('Failed to delete product.', 'error');
       }
@@ -1429,33 +1395,34 @@ export default function ProductsPage() {
     ]
   };
 
+  // Pagination derived values
+  const totalPages = Math.max(1, Math.ceil(totalProducts / PRODUCTS_PER_PAGE));
+  const showingFrom = totalProducts === 0 ? 0 : (activePage - 1) * PRODUCTS_PER_PAGE + 1;
+  const showingTo = Math.min(activePage * PRODUCTS_PER_PAGE, totalProducts);
+  const pageNumbers: (number | 'ellipsis')[] = (() => {
+    if (totalPages <= 7) return Array.from({ length: totalPages }, (_, i) => i + 1);
+    const pages: (number | 'ellipsis')[] = [1];
+    if (activePage > 3) pages.push('ellipsis');
+    for (let i = Math.max(2, activePage - 1); i <= Math.min(totalPages - 1, activePage + 1); i++) {
+      pages.push(i);
+    }
+    if (activePage < totalPages - 2) pages.push('ellipsis');
+    pages.push(totalPages);
+    return pages;
+  })();
+
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans antialiased text-slate-800">
-      
-      {/* Mobile Drawer Backdrop Overlay */}
-      {isMobileOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-45 md:hidden transition-opacity"
-          onClick={() => setIsMobileOpen(false)}
-        />
-      )}
-
       {/* Sidebar Navigation */}
       <AdminSidebar />
 
       {/* Main Container Context */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
-        
+
         {/* Mobile Header Banner */}
-        <header className="md:hidden h-16 bg-white border-b border-slate-200/80 flex items-center justify-between px-6 z-30">
-          <button 
-            onClick={() => setIsMobileOpen(true)}
-            className="p-2 border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+        <header className="md:hidden h-16 bg-white border-b border-slate-200/80 flex items-center justify-center relative px-6 z-30">
           <img src="/logo.png" alt="Color Hut" className="h-7 object-contain" />
-          <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-700 text-sm">
+          <div className="absolute right-6 w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-700 text-sm">
             C
           </div>
         </header>
@@ -1497,11 +1464,9 @@ export default function ProductsPage() {
               </button>
             </div>
 
-            {/* Products Table Wrapper Card */}
-            <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-xl shadow-slate-200/50 p-8">
-              
-              {/* Filters list bar */}
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+            {/* Toolbar: Search + Filters */}
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 mb-5">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div className="relative w-full md:w-96">
                   <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-400">
                     <Search className="h-5 w-5" />
@@ -1534,152 +1499,167 @@ export default function ProductsPage() {
                   />
                 </div>
               </div>
-
-              {/* Table Data Context */}
-              <div className="overflow-x-auto">
-                <table className="w-full" id="productsTable">
-                  <thead>
-                    <tr className="text-left text-xs font-black uppercase tracking-widest text-slate-400 border-b border-slate-100">
-                      <th className="pb-4 pl-4 w-10"></th>
-                      <th className="pb-4 pl-4">Product</th>
-                      <th className="pb-4">Category</th>
-                      <th className="pb-4 text-center">Video</th>
-                      <th className="pb-4">Status</th>
-                      <th className="pb-4 text-center">Pin</th>
-                      <th className="pb-4 pr-4 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody ref={tbodyRef} className="divide-y divide-slate-50">
-                    {products.length === 0 && !isProductsLoading ? (
-                      <tr>
-                        <td colSpan={7} className="text-center py-12 text-slate-400 font-bold uppercase tracking-widest text-xs">
-                          No products found matching criteria
-                        </td>
-                      </tr>
-                    ) : (
-                       products.map((product, index) => {
-                                                let parsedImages: string[] = [];
-                        try {
-                          parsedImages = product.image ? (product.image.startsWith('[') ? JSON.parse(product.image) : [product.image]) : [];
-                        } catch (e) {
-                          parsedImages = product.image ? [product.image] : [];
-                        }
-                        let rawImg = parsedImages[0] || '';
-                        let mainImage = rawImg;
-                        if (rawImg && !rawImg.startsWith('http') && !rawImg.startsWith('data:')) {
-                          mainImage = rawImg.startsWith('/') ? (rawImg.startsWith('/uploads/') ? rawImg : '/uploads' + rawImg) : '/uploads/' + rawImg;
-                        }
-                        if (!mainImage) {
-                          mainImage = 'https://via.placeholder.com/100';
-                        }
-
-                        return (
-                          <tr 
-                            key={`${product.id}-${index}`} 
-                            data-id={product.id}
-                            className="group hover:bg-slate-50/50 transition-colors"
-                          >
-                            <td className="py-4 pl-4">
-                              <div className="drag-handle w-6 h-6 bg-slate-100 rounded text-slate-400 flex items-center justify-center cursor-move hover:bg-slate-200 hover:text-slate-600 transition-colors">
-                                <GripVertical className="w-4 h-4" />
-                              </div>
-                            </td>
-                            <td className="py-4 pl-4">
-                              <div className="flex items-center gap-4">
-                                <img 
-                                  src={mainImage} 
-                                  className="w-12 h-12 rounded-xl object-cover border border-slate-100" 
-                                  alt="Product"
-                                  onError={(e) => {
-                                    (e.target as HTMLImageElement).src = 'https://via.placeholder.com/100';
-                                  }}
-                                />
-                                <div>
-                                  <div className="font-bold text-slate-900">{product.name}</div>
-                                  <div className="flex items-center gap-2">
-                                    <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                      #{product.id.toString().padStart(4, '0')}
-                                    </div>
-                                    {Boolean((product.allow_buy_now === 1 || product.allow_buy_now === true || product.allow_buy_now === '1') && product.price) && (
-                                      <span className="text-[10px] font-extrabold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-md flex items-center gap-1">
-                                        ৳{Number(product.price).toLocaleString()} • Buy Now
-                                      </span>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-4">
-                              <span className="text-sm font-bold text-slate-600 bg-slate-100 px-3 py-1 rounded-lg">
-                                {product.category_name || 'Uncategorized'}
-                              </span>
-                            </td>
-                            <td className="py-4 text-center">
-                              {product.video_url ? (
-                                <a 
-                                  href={product.video_url} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  className="inline-flex items-center justify-center p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
-                                >
-                                  <Youtube className="w-5 h-5" />
-                                </a>
-                              ) : (
-                                <span className="text-slate-300 font-bold text-xs uppercase tracking-widest">N/A</span>
-                              )}
-                            </td>
-                            <td className="py-4">
-                              <span className={`${product.status === 'Published' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'} font-bold text-[10px] uppercase tracking-widest px-2.5 py-1 rounded-lg`}>
-                                {product.status}
-                              </span>
-                            </td>
-                            <td className="py-4 text-center">
-                              <button 
-                                onClick={() => handleToggleProductPin(product)} 
-                                className={`p-2 rounded-lg transition-all ${product.is_pinned ? 'text-orange-500 bg-orange-50' : 'text-slate-300 hover:text-slate-400'}`}
-                              >
-                                <Pin className="w-5 h-5" fill={product.is_pinned ? 'currentColor' : 'none'} />
-                              </button>
-                            </td>
-                            <td className="py-4 pr-4 text-right">
-                              <div className="flex justify-end gap-2">
-                                <button 
-                                  type="button" 
-                                  onClick={() => handleOpenEditModal(product)} 
-                                  className="p-2 text-slate-400 hover:text-orange-600 transition-colors focus:outline-none"
-                                >
-                                  <Edit2 className="w-5 h-5" />
-                                </button>
-                                <button 
-                                  type="button" 
-                                  onClick={() => handleOpenDeleteDialog(product.id)} 
-                                  className="p-2 text-slate-400 hover:text-red-600 transition-colors focus:outline-none"
-                                >
-                                  <Trash className="w-5 h-5" />
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-
             </div>
 
-            {/* Loading Spinner & Infinite Scroll observer */}
-            <div ref={infiniteScrollTriggerRef} className="h-10 flex items-center justify-center mt-10">
-              {isProductsLoading && (
-                <div>
-                  <svg className="animate-spin h-6 w-6 text-orange-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                  </svg>
+            {/* Product List */}
+            {products.length === 0 && !isProductsLoading ? (
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-xs py-16 flex flex-col items-center justify-center text-center">
+                <div className="w-14 h-14 rounded-2xl bg-slate-100 flex items-center justify-center mb-4">
+                  <Package className="w-7 h-7 text-slate-400" />
                 </div>
-              )}
-            </div>
+                <p className="text-slate-600 font-bold text-sm uppercase tracking-widest">No products found</p>
+                <p className="text-slate-400 text-sm mt-1.5">Try adjusting your search or filters.</p>
+              </div>
+            ) : (
+              <div ref={listRef} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+                {products.map((product, index) => {
+                  let parsedImages: string[] = [];
+                  try {
+                    parsedImages = product.image ? (product.image.startsWith('[') ? JSON.parse(product.image) : [product.image]) : [];
+                  } catch (e) {
+                    parsedImages = product.image ? [product.image] : [];
+                  }
+                  let rawImg = parsedImages[0] || '';
+                  let mainImage = rawImg;
+                  if (rawImg && !rawImg.startsWith('http') && !rawImg.startsWith('data:')) {
+                    mainImage = rawImg.startsWith('/') ? (rawImg.startsWith('/uploads/') ? rawImg : '/uploads' + rawImg) : '/uploads/' + rawImg;
+                  }
+                  if (!mainImage) {
+                    mainImage = 'https://via.placeholder.com/300';
+                  }
+
+                  return (
+                    <div
+                      key={`${product.id}-${index}`}
+                      data-id={product.id}
+                      className="group flex flex-col bg-white border border-slate-200/80 rounded-2xl overflow-hidden hover:border-orange-300/70 hover:shadow-lg hover:shadow-orange-500/5 transition-all"
+                    >
+                      {/* Image */}
+                      <div className="relative">
+                        <img
+                          src={mainImage}
+                          className="w-full aspect-square object-cover bg-slate-50"
+                          alt="Product"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = 'https://via.placeholder.com/300';
+                          }}
+                        />
+                        <div className="drag-handle absolute top-2 left-2 w-7 h-7 bg-white/90 backdrop-blur-sm rounded-lg text-slate-400 hidden sm:flex items-center justify-center cursor-move hover:bg-white hover:text-slate-600 shadow-sm transition-colors">
+                          <GripVertical className="w-4 h-4" />
+                        </div>
+                        <button
+                          onClick={() => handleToggleProductPin(product)}
+                          className={`absolute top-2 right-2 p-1.5 rounded-lg bg-white/90 backdrop-blur-sm shadow-sm transition-all ${product.is_pinned ? 'text-orange-500' : 'text-slate-300 hover:text-slate-400'}`}
+                        >
+                          <Pin className="w-4 h-4" fill={product.is_pinned ? 'currentColor' : 'none'} />
+                        </button>
+                        <span className={`absolute bottom-2 left-2 ${product.status === 'Published' ? 'bg-emerald-500/90 text-white' : 'bg-amber-500/90 text-white'} backdrop-blur-sm font-bold text-[9px] uppercase tracking-widest px-2 py-0.5 rounded-md shadow-sm`}>
+                          {product.status}
+                        </span>
+                      </div>
+
+                      {/* Info */}
+                      <div className="flex flex-col flex-1 p-3">
+                        <div className="font-bold text-slate-900 text-sm leading-snug line-clamp-2 min-h-[2.5rem]">{product.name}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">
+                          #{product.id.toString().padStart(4, '0')}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                          <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md truncate max-w-full">
+                            {product.category_name || 'Uncategorized'}
+                          </span>
+                          {Boolean((product.allow_buy_now === 1 || product.allow_buy_now === true || product.allow_buy_now === '1') && product.price) && (
+                            <span className="text-[10px] font-extrabold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-md">
+                              ৳{Number(product.price).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="mt-auto pt-2.5 mt-2.5 border-t border-slate-100 flex items-center justify-between">
+                          {product.video_url ? (
+                            <a
+                              href={product.video_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center justify-center p-1.5 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                            >
+                              <Youtube className="w-4 h-4" />
+                            </a>
+                          ) : (
+                            <span className="w-7" />
+                          )}
+                          <div className="flex gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditModal(product)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-orange-600 hover:bg-orange-50 transition-colors focus:outline-none"
+                            >
+                              <Edit2 className="w-4 h-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDeleteDialog(product.id)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors focus:outline-none"
+                            >
+                              <Trash className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Loading Spinner */}
+            {isProductsLoading && (
+              <div className="py-10 flex items-center justify-center">
+                <svg className="animate-spin h-6 w-6 text-orange-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              </div>
+            )}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="mt-6 bg-white rounded-2xl border border-slate-200 shadow-xs px-5 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+                <p className="text-sm font-semibold text-slate-500">
+                  Showing <span className="text-slate-900 font-bold">{showingFrom}</span>–<span className="text-slate-900 font-bold">{showingTo}</span> of <span className="text-slate-900 font-bold">{totalProducts}</span> products
+                </p>
+                <div className="flex items-center gap-1.5 flex-wrap justify-center">
+                  <button
+                    onClick={() => goToPage(activePage - 1)}
+                    disabled={activePage === 1}
+                    className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  {pageNumbers.map((pg, idx) => (
+                    pg === 'ellipsis' ? (
+                      <span key={`ellipsis-${idx}`} className="w-9 h-9 flex items-center justify-center text-slate-400 font-bold">…</span>
+                    ) : (
+                      <button
+                        key={pg}
+                        onClick={() => goToPage(pg)}
+                        className={`w-9 h-9 rounded-xl text-sm font-bold transition-colors ${pg === activePage ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 border border-transparent'}`}
+                      >
+                        {pg}
+                      </button>
+                    )
+                  ))}
+                  <button
+                    onClick={() => goToPage(activePage + 1)}
+                    disabled={activePage === totalPages}
+                    className="w-9 h-9 rounded-xl border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
 
           </div>
         </main>
@@ -1688,13 +1668,31 @@ export default function ProductsPage() {
       {/* Product Creation & Editing Modal Dialog */}
       {isModalOpen && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-4xl max-w-2xl w-full flex flex-col overflow-hidden max-h-[90vh] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
-            
+          <div className="bg-white rounded-3xl max-w-3xl w-full flex flex-col overflow-hidden max-h-[92vh] shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+
             {/* Sticky Header */}
-            <div className="px-8 pt-8 pb-4 border-b border-slate-100 bg-white flex justify-between items-center shrink-0">
-              <h2 className="text-2xl font-black text-slate-900">
-                {modalMode === 'edit' ? 'Edit Product' : 'New Product'}
-              </h2>
+            <div className="px-7 py-5 border-b border-slate-100 bg-white flex items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-11 h-11 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
+                  <Package className="w-5 h-5 text-orange-600" />
+                </div>
+                <div className="min-w-0">
+                  <h2 className="text-xl font-black text-slate-900 leading-tight">
+                    {modalMode === 'edit' ? 'Edit Product' : 'New Product'}
+                  </h2>
+                  <p className="text-xs text-slate-400 font-medium truncate">
+                    {modalMode === 'edit' ? 'Update details, media, pricing and SEO' : 'Fill in the details to publish a new product'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="w-9 h-9 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 flex items-center justify-center transition-colors shrink-0"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
             
             <form 
@@ -1704,12 +1702,18 @@ export default function ProductsPage() {
             >
               
               {/* Scrollable Form Content */}
-              <div className="flex-1 overflow-y-auto p-8 pt-6 scrollbar-hide">
+              <div className="flex-1 overflow-y-auto p-7 pt-5 scrollbar-hide">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                
+
+                {/* Section: Basic Information */}
+                <div className="md:col-span-2 flex items-center gap-3">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">Basic Information</span>
+                  <div className="flex-1 h-px bg-slate-100" />
+                </div>
+
                 {/* Product Name */}
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
                     Product Name
                   </label>
                   <input 
@@ -1723,7 +1727,7 @@ export default function ProductsPage() {
 
                 {/* Custom Categories Dropdown Selector Tree */}
                 <div className="md:col-span-2 relative">
-                  <label className="block text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-3 ml-1">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
                     Categories
                   </label>
 
@@ -1857,35 +1861,121 @@ export default function ProductsPage() {
                 {/* Rating hidden or set */}
                 <input type="hidden" value={productRating} />
 
-                {/* SEO Keywords Input */}
+                {/* Section: Media */}
+                <div className="md:col-span-2 flex items-center gap-3 pt-2">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">Media</span>
+                  <div className="flex-1 h-px bg-slate-100" />
+                </div>
+
+                {/* Product Images Drag & Drop upload */}
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
-                    SEO Keywords (Comma separated)
+                    Product Images
                   </label>
-                  <input 
-                    type="text" 
-                    value={productSeoKeywords}
-                    onChange={(e) => setProductSeoKeywords(e.target.value)}
-                    placeholder="e.g. premium, design, studio, minimalist"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 px-4 outline-none focus:border-orange-500 font-bold text-slate-700 placeholder:text-slate-400"
+
+                  <div
+                    onClick={(e) => {
+                      if ((e.target as HTMLElement).closest('.remove-image-btn')) return;
+                      triggerImageUpload();
+                    }}
+                    onDragOver={handleDragOver}
+                    onDragLeave={handleDragLeave}
+                    onDrop={handleFileDrop}
+                    className={`relative border-2 border-dashed rounded-3xl p-8 flex flex-col items-center justify-center gap-4 transition-all cursor-pointer group ${
+                      isDragActive
+                        ? 'border-orange-500 bg-orange-50/50 scale-[1.01] shadow-md ring-4 ring-orange-500/10'
+                        : 'border-slate-200 hover:border-orange-500 hover:bg-orange-50/30'
+                    }`}
+                  >
+                    {uploadedImages.length === 0 ? (
+                      <div className="flex flex-col items-center text-center">
+                        <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center text-orange-600 mb-4 group-hover:scale-110 transition-transform">
+                          <UploadCloud className="w-8 h-8" />
+                        </div>
+                        <p className="text-slate-900 font-bold">
+                          Drag & drop or <span className="text-orange-600 underline">click to upload</span>
+                        </p>
+                        <p className="text-slate-400 text-sm font-medium">
+                          Add multiple PNG, JPG or WEBP (Max 5MB each)
+                        </p>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={(e) => e.stopPropagation()}
+                        className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full"
+                      >
+                        {uploadedImages.map((url, index) => (
+                          <div
+                            key={index}
+                            draggable
+                            onDragStart={() => handleDragStart(index)}
+                            onDragOver={handleDragOver}
+                            onDrop={() => handleDrop(index)}
+                            className={`relative group/item aspect-square rounded-xl overflow-hidden shadow-sm border border-slate-100 cursor-move transition-all duration-200 ${draggedIndex === index ? 'opacity-50 border-2 border-dashed border-orange-500 scale-95' : ''}`}
+                          >
+                            <img
+                              src={formatAdminImageUrl(url)}
+                              className="w-full h-full object-cover pointer-events-none"
+                              alt="preview"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => removeImage(index)}
+                              className="remove-image-btn absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-lg opacity-0 group-hover/item:opacity-100 transition-opacity hover:bg-red-700 shadow-lg cursor-pointer"
+                            >
+                              <Trash className="w-3.5 h-3.5" />
+                            </button>
+
+                            <div className="absolute bottom-2 left-2 bg-black/50 text-white text-[10px] font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none">
+                              {index + 1}
+                            </div>
+                          </div>
+                        ))}
+
+                        {/* Plus button / Upload card to add more images */}
+                        <div
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            triggerImageUpload();
+                          }}
+                          className="aspect-square rounded-xl border-2 border-dashed border-slate-200 hover:border-orange-500 hover:bg-orange-50/30 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all group/upload"
+                        >
+                          <Plus className="w-5 h-5 text-slate-450 group-hover/upload:text-orange-500 group-hover/upload:scale-110 transition-all" />
+                          <span className="text-[10px] font-bold text-slate-450 group-hover/upload:text-orange-600 uppercase tracking-wider">
+                            Upload
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Optional Video link */}
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
+                    Video URL (Optional)
+                  </label>
+                  <input
+                    type="url"
+                    value={productVideo}
+                    onChange={(e) => setProductVideo(e.target.value)}
+                    placeholder="https://youtube.com/..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 outline-none focus:border-orange-500 focus:bg-white text-slate-800 font-medium"
                   />
                 </div>
 
-                {/* SEO Description Meta Input */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
-                    SEO Description (Meta Description)
-                  </label>
-                  <textarea 
-                    value={productSeoDescription}
-                    onChange={(e) => setProductSeoDescription(e.target.value)}
-                    placeholder="A brief summary for Google search results..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl py-3 px-4 outline-none focus:border-orange-500 font-bold text-slate-700 placeholder:text-slate-400 resize-none h-24"
-                  />
+                {/* Section: Description */}
+                <div className="md:col-span-2 flex items-center gap-3 pt-2">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">Description</span>
+                  <div className="flex-1 h-px bg-slate-100" />
                 </div>
 
-                {/* Premium Document Editor Story */}
+                {/* Product Description Editor */}
                 <div className="md:col-span-2">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
+                    Product Description
+                  </label>
                   <div className="bg-slate-100/50 rounded-4xl p-4 border border-slate-200">
                     
                     {/* Google Docs Toolbar formatting */}
@@ -2435,88 +2525,10 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                {/* Product Images Drag & Drop upload */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
-                    Product Images
-                  </label>
-                  
-                  <div 
-                    onClick={(e) => {
-                      if ((e.target as HTMLElement).closest('.remove-image-btn')) return;
-                      triggerImageUpload();
-                    }}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleFileDrop}
-                    className={`relative border-2 border-dashed rounded-3xl p-8 flex flex-col items-center justify-center gap-4 transition-all cursor-pointer group ${
-                      isDragActive 
-                        ? 'border-orange-500 bg-orange-50/50 scale-[1.01] shadow-md ring-4 ring-orange-500/10' 
-                        : 'border-slate-200 hover:border-orange-500 hover:bg-orange-50/30'
-                    }`}
-                  >
-                    {uploadedImages.length === 0 ? (
-                      <div className="flex flex-col items-center text-center">
-                        <div className="w-16 h-16 bg-orange-100 rounded-2xl flex items-center justify-center text-orange-600 mb-4 group-hover:scale-110 transition-transform">
-                          <UploadCloud className="w-8 h-8" />
-                        </div>
-                        <p className="text-slate-900 font-bold">
-                          Drag & drop or <span className="text-orange-600 underline">click to upload</span>
-                        </p>
-                        <p className="text-slate-400 text-sm font-medium">
-                          Add multiple PNG, JPG or WEBP (Max 5MB each)
-                        </p>
-                      </div>
-                    ) : (
-                      <div 
-                        onClick={(e) => e.stopPropagation()} 
-                        className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full"
-                      >
-                        {uploadedImages.map((url, index) => (
-                          <div 
-                            key={index}
-                            draggable
-                            onDragStart={() => handleDragStart(index)}
-                            onDragOver={handleDragOver}
-                            onDrop={() => handleDrop(index)}
-                            className={`relative group/item aspect-square rounded-xl overflow-hidden shadow-sm border border-slate-100 cursor-move transition-all duration-200 ${draggedIndex === index ? 'opacity-50 border-2 border-dashed border-orange-500 scale-95' : ''}`}
-                          >
-                            <img 
-                              src={formatAdminImageUrl(url)} 
-                              className="w-full h-full object-cover pointer-events-none" 
-                              alt="preview"
-                            />
-                            
-                            <button 
-                              type="button" 
-                              onClick={() => removeImage(index)}
-                              className="remove-image-btn absolute top-2 right-2 bg-red-600 text-white p-1.5 rounded-lg opacity-0 group-hover/item:opacity-100 transition-opacity hover:bg-red-700 shadow-lg cursor-pointer"
-                            >
-                              <Trash className="w-3.5 h-3.5" />
-                            </button>
-
-                            <div className="absolute bottom-2 left-2 bg-black/50 text-white text-[10px] font-bold px-2 py-1 rounded backdrop-blur-sm pointer-events-none">
-                              {index + 1}
-                            </div>
-                          </div>
-                        ))}
-                        
-                        {/* Plus button / Upload card to add more images */}
-                        <div 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            triggerImageUpload();
-                          }}
-                          className="aspect-square rounded-xl border-2 border-dashed border-slate-200 hover:border-orange-500 hover:bg-orange-50/30 flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all group/upload"
-                        >
-                          <Plus className="w-5 h-5 text-slate-450 group-hover/upload:text-orange-500 group-hover/upload:scale-110 transition-all" />
-                          <span className="text-[10px] font-bold text-slate-450 group-hover/upload:text-orange-600 uppercase tracking-wider">
-                            Upload
-                          </span>
-                        </div>
-                      </div>
-                    )}
-                  </div>
+                {/* Section: Pricing & Checkout */}
+                <div className="md:col-span-2 flex items-center gap-3 pt-2">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">Pricing & Checkout</span>
+                  <div className="flex-1 h-px bg-slate-100" />
                 </div>
 
                 {/* Direct Checkout & Buy Now Option */}
@@ -2577,17 +2589,36 @@ export default function ProductsPage() {
                   )}
                 </div>
 
-                {/* Optional Video link */}
+                {/* Section: SEO & Meta */}
+                <div className="md:col-span-2 flex items-center gap-3 pt-2">
+                  <span className="text-[11px] font-black uppercase tracking-widest text-slate-400">SEO & Meta</span>
+                  <div className="flex-1 h-px bg-slate-100" />
+                </div>
+
+                {/* SEO Keywords Input */}
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2">
-                    Video URL (Optional)
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
+                    SEO Keywords (Comma separated)
                   </label>
-                  <input 
-                    type="url" 
-                    value={productVideo}
-                    onChange={(e) => setProductVideo(e.target.value)}
-                    placeholder="https://youtube.com/..."
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 outline-none focus:border-orange-500 focus:bg-white text-slate-800 font-medium"
+                  <input
+                    type="text"
+                    value={productSeoKeywords}
+                    onChange={(e) => setProductSeoKeywords(e.target.value)}
+                    placeholder="e.g. premium, design, studio, minimalist"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 outline-none focus:border-orange-500 focus:bg-white text-slate-800 font-medium placeholder:text-slate-400"
+                  />
+                </div>
+
+                {/* SEO Description Meta Input */}
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-400 mb-2 ml-1">
+                    SEO Description (Meta Description)
+                  </label>
+                  <textarea
+                    value={productSeoDescription}
+                    onChange={(e) => setProductSeoDescription(e.target.value)}
+                    placeholder="A brief summary for Google search results..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 outline-none focus:border-orange-500 focus:bg-white text-slate-800 font-medium placeholder:text-slate-400 resize-none h-24"
                   />
                 </div>
 
@@ -2595,29 +2626,29 @@ export default function ProductsPage() {
             </div>
             
             {/* Sticky Footer Action Buttons */}
-            <div className="px-8 py-6 border-t border-slate-100 bg-white shrink-0">
-              <div className="flex gap-3">
-                <button 
-                  type="button" 
+            <div className="px-7 py-5 border-t border-slate-100 bg-white shrink-0">
+              <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2.5">
+                <button
+                  type="button"
                   onClick={() => setIsModalOpen(false)}
-                  className="flex-1 bg-slate-100 text-slate-700 py-3 rounded-xl font-bold hover:bg-slate-200 transition-colors"
+                  className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-600 text-sm font-bold hover:bg-slate-50 transition-colors"
                 >
                   Cancel
                 </button>
-                
+
                 {modalMode === 'create' && (
-                  <button 
-                    type="button" 
+                  <button
+                    type="button"
                     onClick={(e) => handleSaveProductSubmit(e, true)}
-                    className="flex-1 bg-orange-600 text-white py-3 rounded-xl font-bold hover:bg-orange-700 transition-colors"
+                    className="px-5 py-2.5 rounded-xl border border-orange-200 bg-orange-50 text-orange-700 text-sm font-bold hover:bg-orange-100 transition-colors"
                   >
                     Save & Add New
                   </button>
                 )}
 
-                <button 
+                <button
                   type="submit"
-                  className="flex-1 bg-slate-900 text-white py-3 rounded-xl font-bold hover:bg-orange-600 transition-colors flex items-center justify-center gap-2"
+                  className="px-6 py-2.5 rounded-xl bg-orange-600 text-white text-sm font-bold hover:bg-orange-700 shadow-md shadow-orange-500/20 transition-colors flex items-center justify-center gap-2"
                 >
                   <Save className="w-4 h-4" />
                   Save Product

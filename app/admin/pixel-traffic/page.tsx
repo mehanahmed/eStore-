@@ -14,7 +14,6 @@ import {
   Trash2,
   ChevronLeft,
   LogOut,
-  Menu,
   X,
   Settings,
   HelpCircle,
@@ -85,7 +84,6 @@ export default function PixelTrafficPage() {
 
   // Sidebar collapsibility
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
-  const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   // Hover state for custom SVG line chart tooltip
   const [activePoint, setActivePoint] = useState<{ index: number; x: number; y: number; label: string; value: number } | null>(null);
@@ -717,29 +715,15 @@ export default function PixelTrafficPage() {
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans antialiased text-slate-800">
-      {/* Sidebar Overlay (Mobile) */}
-      {isMobileOpen && (
-        <div 
-          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 md:hidden transition-opacity"
-          onClick={() => setIsMobileOpen(false)}
-        />
-      )}
-
       {/* Sidebar */}
       <AdminSidebar />
 
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden relative">
         {/* Mobile Header */}
-        <header className="md:hidden h-16 bg-white border-b border-slate-200/80 flex items-center justify-between px-6 z-30">
-          <button 
-            onClick={() => setIsMobileOpen(true)}
-            className="p-2 border border-slate-200 rounded-lg text-slate-500 hover:bg-slate-50"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
+        <header className="md:hidden h-16 bg-white border-b border-slate-200/80 flex items-center justify-center relative px-6 z-30">
           <img src="/logo.png" alt="Color Hut" className="h-7 object-contain" />
-          <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-700 text-sm">
+          <div className="absolute right-6 w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center font-bold text-slate-700 text-sm">
             A
           </div>
         </header>
