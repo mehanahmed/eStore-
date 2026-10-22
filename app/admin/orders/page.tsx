@@ -59,6 +59,58 @@ export default function OrdersAdminPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
 
+  // Delivery Charges Setting Modal State
+  const [deliveryModalOpen, setDeliveryModalOpen] = useState(false);
+  const [deliveryCharges, setDeliveryCharges] = useState({
+    inside_dhaka: 70,
+    outside_dhaka: 130
+  });
+  const [savingDelivery, setSavingDelivery] = useState(false);
+  const [deliverySaved, setDeliverySaved] = useState(false);
+
+  const fetchDeliverySettings = async () => {
+    try {
+      const res = await fetch('/api/admin/settings');
+      if (res.ok) {
+        const data = await res.json();
+        setDeliveryCharges({
+          inside_dhaka: data.delivery_inside_dhaka !== undefined && data.delivery_inside_dhaka !== '' ? Number(data.delivery_inside_dhaka) : 70,
+          outside_dhaka: data.delivery_outside_dhaka !== undefined && data.delivery_outside_dhaka !== '' ? Number(data.delivery_outside_dhaka) : 130
+        });
+      }
+    } catch (e) {
+      console.error('Failed to load delivery settings:', e);
+    }
+  };
+
+  const handleSaveDelivery = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSavingDelivery(true);
+    try {
+      const res = await fetch('/api/admin/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          delivery_inside_dhaka: String(deliveryCharges.inside_dhaka),
+          delivery_outside_dhaka: String(deliveryCharges.outside_dhaka)
+        })
+      });
+      if (res.ok) {
+        setDeliverySaved(true);
+        setTimeout(() => {
+          setDeliverySaved(false);
+          setDeliveryModalOpen(false);
+        }, 1200);
+      } else {
+        alert('Failed to save delivery charges');
+      }
+    } catch (err) {
+      alert('Error saving delivery charges');
+    } finally {
+      setSavingDelivery(false);
+    }
+  };
+
   const [stats, setStats] = useState({
     total_count: 0,
     total_sales: 0,
@@ -88,6 +140,7 @@ export default function OrdersAdminPage() {
 
   useEffect(() => {
     fetchOrders();
+    fetchDeliverySettings();
   }, [statusFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -151,13 +204,24 @@ export default function OrdersAdminPage() {
             </p>
           </div>
 
-          <button
-            onClick={fetchOrders}
-            className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-xs"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Refresh</span>
-          </button>
+          <div className="flex items-center gap-2.5">
+            <button
+              onClick={() => setDeliveryModalOpen(true)}
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-orange-200 bg-orange-50 hover:bg-orange-100 text-orange-700 text-xs font-bold transition-all shadow-xs"
+              title="Set Delivery Charges for Inside & Outside Dhaka"
+            >
+              <Truck className="w-3.5 h-3.5 text-orange-600" />
+              <span>Delivery Charges (৳{deliveryCharges.inside_dhaka} / ৳{deliveryCharges.outside_dhaka})</span>
+            </button>
+
+            <button
+              onClick={fetchOrders}
+              className="flex items-center gap-2 px-3.5 py-1.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold transition-all shadow-xs"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Refresh</span>
+            </button>
+          </div>
         </header>
 
         <div className="p-8 max-w-7xl mx-auto w-full space-y-6">
@@ -428,6 +492,93 @@ export default function OrdersAdminPage() {
                   Close
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Delivery Charges Settings Modal */}
+        {deliveryModalOpen && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 animate-in fade-in zoom-in-95 duration-150">
+              <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-orange-100 text-orange-600 flex items-center justify-center">
+                    <Truck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-900 text-base">Delivery Charges</h3>
+                    <p className="text-xs text-slate-500">Checkout delivery fee settings</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setDeliveryModalOpen(false)}
+                  className="w-8 h-8 rounded-full hover:bg-slate-100 flex items-center justify-center text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveDelivery} className="space-y-4 pt-5">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                    Inside Dhaka Delivery (৳)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={deliveryCharges.inside_dhaka}
+                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, inside_dhaka: Number(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-8 pr-4 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">Applied automatically when customer selects Inside Dhaka</p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
+                    Outside Dhaka Delivery (৳)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={deliveryCharges.outside_dhaka}
+                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, outside_dhaka: Number(e.target.value) })}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2.5 pl-8 pr-4 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm"
+                      required
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1">Applied automatically when customer selects Outside Dhaka</p>
+                </div>
+
+                <div className="pt-4 flex items-center justify-end gap-2.5 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setDeliveryModalOpen(false)}
+                    className="px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-bold transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={savingDelivery}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-md shadow-orange-500/20 disabled:opacity-50 transition-all"
+                  >
+                    {savingDelivery ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : deliverySaved ? (
+                      <Check className="w-3.5 h-3.5 text-white" />
+                    ) : (
+                      <Truck className="w-3.5 h-3.5" />
+                    )}
+                    <span>{deliverySaved ? 'Saved Successfully!' : savingDelivery ? 'Saving...' : 'Save Delivery Charges'}</span>
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

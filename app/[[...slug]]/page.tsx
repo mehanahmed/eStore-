@@ -592,14 +592,22 @@ const MeetingRequestPopup = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
 
     useEffect(() => {
         if (!isOpen) return;
-        // Check if user has already submitted successfully
-        const hasSubmitted = localStorage.getItem('request_submitted');
-        if (hasSubmitted) {
-            onClose();
-        }
+        // Check if user has already submitted successfully or already seen the popup
+        try {
+            const hasSubmitted = localStorage.getItem('request_submitted');
+            const hasSeen = localStorage.getItem('meeting_popup_shown');
+            if (hasSubmitted || hasSeen) {
+                onClose();
+            } else {
+                localStorage.setItem('meeting_popup_shown', 'true');
+            }
+        } catch (e) {}
     }, [isOpen, onClose]);
 
     const handleClose = () => {
+        try {
+            localStorage.setItem('meeting_popup_shown', 'true');
+        } catch (e) {}
         onClose();
     };
 
@@ -638,6 +646,7 @@ const MeetingRequestPopup = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
             });
             if (response.ok) {
                 localStorage.setItem('request_submitted', 'true');
+                localStorage.setItem('meeting_popup_shown', 'true');
                 window.location.href = '/thank-you/';
             } else {
                 alert('Failed to submit request. Please try again.');
@@ -848,6 +857,7 @@ const MeetingFormSection = ({ initialBusinessType, onStartFilling }: { initialBu
             });
             if (response.ok) {
                 localStorage.setItem('request_submitted', 'true');
+                localStorage.setItem('meeting_popup_shown', 'true');
                 window.location.href = '/thank-you/';
             } else {
                 alert('Failed to submit request. Please try again.');
@@ -1127,55 +1137,46 @@ export default function HomePage() {
         return () => document.body.classList.remove('no-scroll');
     }, [mobileSheetOpen, meetingPopupOpen, imagePopupOpen]);
 
-    const popupTimeoutRef = useRef(10000); // starts at 10s
-
     useEffect(() => {
-        const hasSubmitted = localStorage.getItem('request_submitted');
-        if (hasSubmitted || isFillingForm || isMeetingHidden) return;
+        try {
+            const hasSubmitted = localStorage.getItem('request_submitted');
+            const hasSeen = localStorage.getItem('meeting_popup_shown');
+            if (hasSubmitted || hasSeen || isFillingForm || isMeetingHidden) return;
 
-        const excludedSlugs = ['restaurant', 'parlor', 'parlour'];
-        const isExcludedPage = slug && excludedSlugs.includes(slug.toLowerCase());
-        const isRelevantPage = isBaseHome || (!isExcludedPage && slug !== 'all' && categories.some(c => c.slug === slug));
+            const excludedSlugs = ['restaurant', 'parlor', 'parlour'];
+            const isExcludedPage = slug && excludedSlugs.includes(slug.toLowerCase());
+            const isRelevantPage = isBaseHome || (!isExcludedPage && slug !== 'all' && categories.some(c => c.slug === slug));
 
-        if (isRelevantPage) {
-            const timer = setTimeout(() => {
-                if (!localStorage.getItem('request_submitted') && !isMeetingHidden) {
-                    setMeetingPopupOpen(true);
-                }
-            }, popupTimeoutRef.current);
-            return () => clearTimeout(timer);
-        } else if (isExcludedPage) {
-            const timer = setTimeout(() => {
-                if (!localStorage.getItem('request_submitted')) {
-                    setImagePopupOpen(true);
-                }
-            }, popupTimeoutRef.current);
-            return () => clearTimeout(timer);
-        }
+            if (isRelevantPage) {
+                const timer = setTimeout(() => {
+                    const stillSubmitted = localStorage.getItem('request_submitted');
+                    const stillSeen = localStorage.getItem('meeting_popup_shown');
+                    if (!stillSubmitted && !stillSeen && !isMeetingHidden) {
+                        setMeetingPopupOpen(true);
+                        localStorage.setItem('meeting_popup_shown', 'true');
+                    }
+                }, 5000);
+                return () => clearTimeout(timer);
+            } else if (isExcludedPage) {
+                const timer = setTimeout(() => {
+                    if (!localStorage.getItem('request_submitted')) {
+                        setImagePopupOpen(true);
+                    }
+                }, 10000);
+                return () => clearTimeout(timer);
+            }
+        } catch (e) {}
     }, [slug, isBaseHome, categories.length, isFillingForm, isMeetingHidden]);
 
     const handlePopupClose = (type: 'meeting' | 'image') => {
-        if (type === 'meeting') setMeetingPopupOpen(false);
-        else setImagePopupOpen(false);
-
-        const currentWaitTime = popupTimeoutRef.current;
-        // Increase wait time by 10s for the next time
-        popupTimeoutRef.current += 10000;
-
-        // Re-trigger after currentWaitTime if not submitted and NOT being filled
-        setTimeout(() => {
-            const hasSubmitted = localStorage.getItem('request_submitted');
-            // We use the raw DOM check or focus check for more reliability in timeout
-            const isActuallyFilling = document.activeElement?.closest('#meeting-call');
-
-            if (!hasSubmitted && !isActuallyFilling) {
-                if (type === 'meeting') setMeetingPopupOpen(true);
-                else setImagePopupOpen(true);
-            } else if (isActuallyFilling) {
-                // If they are filling, restart the wait cycle
-                handlePopupClose(type);
-            }
-        }, currentWaitTime);
+        if (type === 'meeting') {
+            setMeetingPopupOpen(false);
+            try {
+                localStorage.setItem('meeting_popup_shown', 'true');
+            } catch (e) {}
+        } else {
+            setImagePopupOpen(false);
+        }
     };
 
 

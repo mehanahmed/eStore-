@@ -28,11 +28,12 @@ import {
   Facebook,
   Instagram,
   Youtube,
-  Video
+  Video,
+  Truck
 } from 'lucide-react';
 
 export default function SeoSettingsPage() {
-  const [activeTab, setActiveTab] = useState<'seo' | 'social' | 'robots'>('seo');
+  const [activeTab, setActiveTab] = useState<'seo' | 'social' | 'robots' | 'shipping'>('seo');
 
   // Settings Form State
   const [formData, setFormData] = useState({
@@ -43,7 +44,9 @@ export default function SeoSettingsPage() {
     social_facebook: '',
     social_instagram: '',
     social_youtube: '',
-    social_pinterest: ''
+    social_pinterest: '',
+    delivery_inside_dhaka: '70',
+    delivery_outside_dhaka: '130'
   });
   const [robotsContent, setRobotsContent] = useState('');
   
@@ -93,7 +96,9 @@ export default function SeoSettingsPage() {
             social_facebook: settings.social_facebook || '',
             social_instagram: settings.social_instagram || '',
             social_youtube: settings.social_youtube || '',
-            social_pinterest: settings.social_pinterest || ''
+            social_pinterest: settings.social_pinterest || '',
+            delivery_inside_dhaka: settings.delivery_inside_dhaka || '70',
+            delivery_outside_dhaka: settings.delivery_outside_dhaka || '130'
           });
           setRobotsContent(robots.content || '');
         } else {
@@ -284,6 +289,16 @@ export default function SeoSettingsPage() {
                   >
                     <Search className="w-4.5 h-4.5" />
                     Sitemap & robots.txt
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('shipping')}
+                    className={`pb-4 text-sm font-bold border-b-2 transition-all flex items-center gap-2 ${
+                      activeTab === 'shipping' ? 'border-orange-600 text-orange-600' : 'border-transparent text-slate-400 hover:text-slate-600'
+                    }`}
+                  >
+                    <Truck className="w-4.5 h-4.5" />
+                    Delivery Charges
                   </button>
                 </div>
 
@@ -582,6 +597,88 @@ export default function SeoSettingsPage() {
                             <Save className="w-4 h-4" />
                           )}
                           Save Robots Config
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {activeTab === 'shipping' && (
+                    <div className="space-y-8 animate-fadeIn">
+                      {/* Section Info */}
+                      <div>
+                        <h3 className="text-lg font-extrabold text-slate-900 mb-1">Checkout Delivery Charges</h3>
+                        <p className="text-xs text-slate-400 font-medium">Set delivery fees automatically added to the customer's total at checkout.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* Inside Dhaka */}
+                        <div className="p-6 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-4">
+                          <div className="flex items-center gap-3">
+                            <span className="w-10 h-10 bg-orange-500/10 text-orange-600 rounded-xl flex items-center justify-center font-bold">
+                              ৳
+                            </span>
+                            <div>
+                              <h4 className="font-extrabold text-slate-900 text-sm">Inside Dhaka Delivery</h4>
+                              <p className="text-xs text-slate-500 font-medium">24 - 48 Hours Express Delivery</p>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-400 block mb-2">
+                              Charge Amount (৳)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={formData.delivery_inside_dhaka}
+                              onChange={(e) => setFormData({ ...formData, delivery_inside_dhaka: e.target.value })}
+                              placeholder="70"
+                              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none text-slate-900 font-bold text-sm"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        {/* Outside Dhaka */}
+                        <div className="p-6 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-4">
+                          <div className="flex items-center gap-3">
+                            <span className="w-10 h-10 bg-blue-500/10 text-blue-600 rounded-xl flex items-center justify-center font-bold">
+                              ৳
+                            </span>
+                            <div>
+                              <h4 className="font-extrabold text-slate-900 text-sm">Outside Dhaka Delivery</h4>
+                              <p className="text-xs text-slate-500 font-medium">2 - 3 Days Nationwide Delivery</p>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-xs font-black uppercase tracking-widest text-slate-400 block mb-2">
+                              Charge Amount (৳)
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              value={formData.delivery_outside_dhaka}
+                              onChange={(e) => setFormData({ ...formData, delivery_outside_dhaka: e.target.value })}
+                              placeholder="130"
+                              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-orange-500/20 focus:border-orange-500 outline-none text-slate-900 font-bold text-sm"
+                              required
+                            />
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Save Button */}
+                      <div className="flex justify-end pt-6 border-t border-slate-100">
+                        <button
+                          type="submit"
+                          disabled={isSaving}
+                          className="inline-flex items-center justify-center gap-2 px-8 py-3.5 bg-slate-900 hover:bg-orange-600 text-white rounded-lg font-bold transition-all duration-200 disabled:bg-slate-400 disabled:scale-100 disabled:cursor-not-allowed shadow-lg hover:shadow-orange-500/10 active:scale-[0.98] text-sm w-full sm:w-auto text-center"
+                        >
+                          {isSaving ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Save className="w-4 h-4" />
+                          )}
+                          Save Delivery Charges
                         </button>
                       </div>
                     </div>

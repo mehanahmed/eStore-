@@ -428,13 +428,22 @@ const MeetingRequestPopup = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
 
     useEffect(() => {
         if (!isOpen) return;
-        const hasSubmitted = localStorage.getItem('request_submitted');
-        if (hasSubmitted) {
-            onClose();
-        }
+        // Check if user has already submitted successfully or already seen the popup
+        try {
+            const hasSubmitted = localStorage.getItem('request_submitted');
+            const hasSeen = localStorage.getItem('meeting_popup_shown');
+            if (hasSubmitted || hasSeen) {
+                onClose();
+            } else {
+                localStorage.setItem('meeting_popup_shown', 'true');
+            }
+        } catch (e) {}
     }, [isOpen, onClose]);
 
     const handleClose = () => {
+        try {
+            localStorage.setItem('meeting_popup_shown', 'true');
+        } catch (e) {}
         onClose();
     };
 
@@ -473,6 +482,7 @@ const MeetingRequestPopup = ({ isOpen, onClose }: { isOpen: boolean, onClose: ()
             });
             if (response.ok) {
                 localStorage.setItem('request_submitted', 'true');
+                localStorage.setItem('meeting_popup_shown', 'true');
                 window.location.href = '/thank-you/';
             } else {
                 alert('Failed to submit request. Please try again.');
@@ -682,6 +692,7 @@ const MeetingFormSection = ({ initialBusinessType, onStartFilling }: { initialBu
             });
             if (response.ok) {
                 localStorage.setItem('request_submitted', 'true');
+                localStorage.setItem('meeting_popup_shown', 'true');
                 window.location.href = '/thank-you/';
             } else {
                 alert('Failed to submit request. Please try again.');
@@ -1109,53 +1120,48 @@ export default function CategoryPage() {
         return () => document.body.classList.remove('no-scroll');
     }, [mobileSheetOpen, meetingPopupOpen, imagePopupOpen]);
 
-    const popupTimeoutRef = useRef(10000);
-
     useEffect(() => {
-        const hasSubmitted = localStorage.getItem('request_submitted');
-        if (hasSubmitted || isFillingForm || isMeetingHidden) return;
+        try {
+            const hasSubmitted = localStorage.getItem('request_submitted');
+            const hasSeen = localStorage.getItem('meeting_popup_shown');
+            if (hasSubmitted || hasSeen || isFillingForm || isMeetingHidden) return;
 
-        const currentCat = categories.find(c => String(c.id) === String(id));
-        const catSlug = currentCat?.slug || '';
-        const excludedSlugs = ['restaurant', 'parlor', 'parlour'];
-        const isExcludedPage = catSlug && excludedSlugs.includes(catSlug.toLowerCase());
-        const isRelevantPage = !isExcludedPage && catSlug !== 'all' && categories.some(c => c.slug === catSlug);
+            const currentCat = categories.find(c => String(c.id) === String(id));
+            const catSlug = currentCat?.slug || '';
+            const excludedSlugs = ['restaurant', 'parlor', 'parlour'];
+            const isExcludedPage = catSlug && excludedSlugs.includes(catSlug.toLowerCase());
+            const isRelevantPage = !isExcludedPage && catSlug !== 'all' && categories.some(c => c.slug === catSlug);
 
-        if (isRelevantPage) {
-            const timer = setTimeout(() => {
-                if (!localStorage.getItem('request_submitted') && !isMeetingHidden) {
-                    setMeetingPopupOpen(true);
-                }
-            }, popupTimeoutRef.current);
-            return () => clearTimeout(timer);
-        } else if (isExcludedPage) {
-            const timer = setTimeout(() => {
-                if (!localStorage.getItem('request_submitted')) {
-                    setImagePopupOpen(true);
-                }
-            }, popupTimeoutRef.current);
-            return () => clearTimeout(timer);
-        }
+            if (isRelevantPage) {
+                const timer = setTimeout(() => {
+                    const stillSubmitted = localStorage.getItem('request_submitted');
+                    const stillSeen = localStorage.getItem('meeting_popup_shown');
+                    if (!stillSubmitted && !stillSeen && !isMeetingHidden) {
+                        setMeetingPopupOpen(true);
+                        localStorage.setItem('meeting_popup_shown', 'true');
+                    }
+                }, 5000);
+                return () => clearTimeout(timer);
+            } else if (isExcludedPage) {
+                const timer = setTimeout(() => {
+                    if (!localStorage.getItem('request_submitted')) {
+                        setImagePopupOpen(true);
+                    }
+                }, 10000);
+                return () => clearTimeout(timer);
+            }
+        } catch (e) {}
     }, [id, categories.length, isFillingForm, isMeetingHidden]);
 
     const handlePopupClose = (type: 'meeting' | 'image') => {
-        if (type === 'meeting') setMeetingPopupOpen(false);
-        else setImagePopupOpen(false);
-
-        const currentWaitTime = popupTimeoutRef.current;
-        popupTimeoutRef.current += 10000;
-
-        setTimeout(() => {
-            const hasSubmitted = localStorage.getItem('request_submitted');
-            const isActuallyFilling = document.activeElement?.closest('#meeting-call');
-
-            if (!hasSubmitted && !isActuallyFilling) {
-                if (type === 'meeting') setMeetingPopupOpen(true);
-                else setImagePopupOpen(true);
-            } else if (isActuallyFilling) {
-                handlePopupClose(type);
-            }
-        }, currentWaitTime);
+        if (type === 'meeting') {
+            setMeetingPopupOpen(false);
+            try {
+                localStorage.setItem('meeting_popup_shown', 'true');
+            } catch (e) {}
+        } else {
+            setImagePopupOpen(false);
+        }
     };
 
     // Horizontal Mouse Scroll

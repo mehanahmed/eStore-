@@ -659,6 +659,14 @@ db.getConnection((err, connection) => {
 
                                                             // Create Settings & Traffic
                                                             connection.query(createSettingsTable, () => {
+                                                                // Seed default delivery charges if not present
+                                                                connection.query(`
+                                                                    INSERT IGNORE INTO site_settings (setting_key, setting_value) 
+                                                                    VALUES ('delivery_inside_dhaka', '70'), ('delivery_outside_dhaka', '130')
+                                                                `, (err) => {
+                                                                    if (err) console.error('Error seeding default delivery settings:', err);
+                                                                });
+
                                                                 connection.query(createCategoryParentsTable, (err) => {
                                                                     if (err) console.error('Error creating category_parents table:', err);
 
@@ -1489,7 +1497,7 @@ app.post('/api/products/reorder', requireAuth, (req, res) => {
 // ===== ORDERS API =====
 
 // 1. Public Place Order
-app.post('/api/public/orders', (req, res) => {
+app.post('/api/public/orders', async (req, res) => {
     const {
         customer_name,
         customer_phone,
@@ -1516,7 +1524,21 @@ app.post('/api/public/orders', (req, res) => {
         return acc + (itemPrice * itemQty);
     }, 0);
 
-    const shipping_fee = delivery_zone === 'outside_dhaka' ? 130 : 70;
+    let insideDhakaFee = 70;
+    let outsideDhakaFee = 130;
+    try {
+        const siteCfg = await getCachedSettings();
+        if (siteCfg.delivery_inside_dhaka !== undefined && siteCfg.delivery_inside_dhaka !== '') {
+            insideDhakaFee = Number(siteCfg.delivery_inside_dhaka);
+        }
+        if (siteCfg.delivery_outside_dhaka !== undefined && siteCfg.delivery_outside_dhaka !== '') {
+            outsideDhakaFee = Number(siteCfg.delivery_outside_dhaka);
+        }
+    } catch (e) {
+        console.error('Error getting delivery charges for order:', e);
+    }
+
+    const shipping_fee = delivery_zone === 'outside_dhaka' ? outsideDhakaFee : insideDhakaFee;
     const total_amount = subtotal + shipping_fee;
 
     const now = new Date();
@@ -2334,7 +2356,9 @@ app.get('/api/public/config', async (req, res) => {
             social_youtube: config.social_youtube || '',
             social_pinterest: config.social_pinterest || '',
             demo_video_url: config.demo_video_url || '',
-            demo_videos: config.demo_videos || '[]'
+            demo_videos: config.demo_videos || '[]',
+            delivery_inside_dhaka: config.delivery_inside_dhaka !== undefined && config.delivery_inside_dhaka !== '' ? Number(config.delivery_inside_dhaka) : 70,
+            delivery_outside_dhaka: config.delivery_outside_dhaka !== undefined && config.delivery_outside_dhaka !== '' ? Number(config.delivery_outside_dhaka) : 130
         });
     } catch (err) {
         res.status(500).json({});

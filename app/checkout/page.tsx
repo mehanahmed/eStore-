@@ -57,6 +57,26 @@ function CheckoutContent() {
   const [errorMessage, setErrorMessage] = useState('');
   const [orderSuccess, setOrderSuccess] = useState<any>(null);
 
+  // Delivery Charges (Configured from admin)
+  const [shippingRates, setShippingRates] = useState({
+    inside_dhaka: 70,
+    outside_dhaka: 130
+  });
+
+  useEffect(() => {
+    fetch('/api/public/config')
+      .then(res => res.ok ? res.json() : null)
+      .then(cfg => {
+        if (cfg) {
+          setShippingRates({
+            inside_dhaka: cfg.delivery_inside_dhaka !== undefined ? Number(cfg.delivery_inside_dhaka) : 70,
+            outside_dhaka: cfg.delivery_outside_dhaka !== undefined ? Number(cfg.delivery_outside_dhaka) : 130
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Pre-fill user session if logged in
   useEffect(() => {
     fetch('/api/user/me')
@@ -118,7 +138,7 @@ function CheckoutContent() {
   // Calculations
   const unitPrice = product?.price ? Number(product.price) : 0;
   const subtotal = unitPrice * quantity;
-  const shippingFee = deliveryZone === 'outside_dhaka' ? 130 : 70;
+  const shippingFee = deliveryZone === 'outside_dhaka' ? shippingRates.outside_dhaka : shippingRates.inside_dhaka;
   const totalAmount = subtotal + shippingFee;
 
   // Handle Form Submit
@@ -477,7 +497,7 @@ function CheckoutContent() {
                         <div className="text-[11px] text-slate-500">24 - 48 Hours Delivery</div>
                       </div>
                     </div>
-                    <span className="font-extrabold text-slate-900 text-sm">৳70</span>
+                    <span className="font-extrabold text-slate-900 text-sm">৳{shippingRates.inside_dhaka}</span>
                   </label>
 
                   <label
@@ -501,7 +521,7 @@ function CheckoutContent() {
                         <div className="text-[11px] text-slate-500">2 - 3 Days Delivery</div>
                       </div>
                     </div>
-                    <span className="font-extrabold text-slate-900 text-sm">৳130</span>
+                    <span className="font-extrabold text-slate-900 text-sm">৳{shippingRates.outside_dhaka}</span>
                   </label>
                 </div>
               </div>
