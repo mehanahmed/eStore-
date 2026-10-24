@@ -17,6 +17,11 @@ const {
     buildUserData,
     sendMetaCapiEvent
 } = require('./lib/meta-capi');
+const {
+    getPaystationConfig,
+    initiatePayment,
+    verifyPayment
+} = require('./lib/paystation');
 
 // Basic Health Check (Placed before heavy middleware for cPanel compatibility)
 app.get('/health', (req, res) => {
@@ -491,16 +496,19 @@ db.getConnection((err, connection) => {
     const createOrdersTable = `
         CREATE TABLE IF NOT EXISTS orders (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            order_number VARCHAR(50) UNIQUE NOT NULL,
-            customer_name VARCHAR(150) NOT NULL,
+            user_id INT NULL,
+            order_number VARCHAR(60) UNIQUE NOT NULL,
+            customer_name VARCHAR(255) NOT NULL,
             customer_phone VARCHAR(50) NOT NULL,
-            customer_email VARCHAR(150),
+            customer_email VARCHAR(255),
             shipping_address TEXT NOT NULL,
             city VARCHAR(100) DEFAULT 'Dhaka',
-            delivery_zone ENUM('inside_dhaka', 'outside_dhaka') DEFAULT 'inside_dhaka',
+            delivery_zone VARCHAR(100) DEFAULT 'inside_dhaka',
             order_notes TEXT,
-            payment_method ENUM('cod', 'bkash', 'nagad', 'card') DEFAULT 'cod',
+            payment_method VARCHAR(50) DEFAULT 'cod',
             payment_status ENUM('pending', 'paid', 'failed') DEFAULT 'pending',
+            transaction_id VARCHAR(100) NULL,
+            payment_details TEXT NULL,
             order_status ENUM('pending', 'confirmed', 'processing', 'shipped', 'delivered', 'cancelled') DEFAULT 'pending',
             subtotal DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
             shipping_fee DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
@@ -695,6 +703,24 @@ db.getConnection((err, connection) => {
                                                                         // Create Orders Table
                                                                         connection.query(createOrdersTable, (err) => {
                                                                             if (err) console.error('Error creating orders table:', err);
+
+                                                                            // Safe non-destructive migrations for existing production database
+                                                                            const safeOrderMigrations = [
+                                                                                "ALTER TABLE orders ADD COLUMN user_id INT NULL AFTER id",
+                                                                                "ALTER TABLE orders ADD COLUMN transaction_id VARCHAR(100) NULL AFTER payment_status",
+                                                                                "ALTER TABLE orders ADD COLUMN payment_details TEXT NULL AFTER transaction_id",
+                                                                                "ALTER TABLE orders MODIFY COLUMN payment_method VARCHAR(50) DEFAULT 'cod'",
+                                                                                "ALTER TABLE orders MODIFY COLUMN order_number VARCHAR(60) NOT NULL",
+                                                                                "ALTER TABLE orders MODIFY COLUMN customer_name VARCHAR(255) NOT NULL",
+                                                                                "ALTER TABLE orders MODIFY COLUMN customer_email VARCHAR(255) NULL",
+                                                                                "ALTER TABLE orders MODIFY COLUMN delivery_zone VARCHAR(100) DEFAULT 'inside_dhaka'"
+                                                                            ];
+
+                                                                            safeOrderMigrations.forEach(q => {
+                                                                                connection.query(q, () => {
+                                                                                    // Silently ignore if column already exists or modified
+                                                                                });
+                                                                            });
                                                                         });
 
                                                                         // Create Meeting Requests Table
@@ -1595,8 +1621,48 @@ app.post('/api/public/orders', async (req, res) => {
     const randPart = Math.floor(1000 + Math.random() * 9000);
     const order_number = `ORD-${dateStr}-${randPart}`;
 
+    // Auto-create customer account or link existing account
+    let userId = req.session?.userSession?.id || null;
+    let accountCreated = false;
+    let tempPassword = null;
+    const cleanPhoneDigits = customer_phone.replace(/\D/g, '');
+    const userEmail = customer_email && customer_email.includes('@')
+        ? customer_email.trim().toLowerCase()
+        : `${cleanPhoneDigits}@customer.colorhutbd.xyz`;
+
+    if (!userId) {
+        try {
+            const [existingUsers] = await db.promise().query(
+                'SELECT id, name, email FROM users WHERE email = ? LIMIT 1',
+                [userEmail]
+            );
+
+            if (existingUsers && existingUsers.length > 0) {
+                userId = existingUsers[0].id;
+                if (!req.session.userSession) {
+                    req.session.userSession = { id: existingUsers[0].id, name: existingUsers[0].name, email: existingUsers[0].email };
+                }
+            } else {
+                tempPassword = `Pass${cleanPhoneDigits.slice(-4) || '1234'}`;
+                const hashedPassword = await bcrypt.hash(tempPassword, saltRounds);
+
+                const [insertUserResult] = await db.promise().query(
+                    'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, "user")',
+                    [customer_name.trim(), userEmail, hashedPassword]
+                );
+
+                userId = insertUserResult.insertId;
+                accountCreated = true;
+                req.session.userSession = { id: userId, name: customer_name.trim(), email: userEmail };
+            }
+        } catch (authErr) {
+            console.error('[Auto-Account Error]:', authErr.message);
+        }
+    }
+
     const query = `
         INSERT INTO orders (
+            user_id,
             order_number,
             customer_name,
             customer_phone,
@@ -1612,10 +1678,11 @@ app.post('/api/public/orders', async (req, res) => {
             shipping_fee,
             total_amount,
             items_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', ?, ?, ?, ?)
     `;
 
     db.query(query, [
+        userId,
         order_number,
         customer_name.trim(),
         customer_phone.trim(),
@@ -1635,13 +1702,166 @@ app.post('/api/public/orders', async (req, res) => {
             return res.status(500).json({ error: 'Failed to place order. Please try again.' });
         }
 
+        // If payment method is PayStation, initialize payment gateway link
+        if (payment_method === 'paystation') {
+            (async () => {
+                try {
+                    const siteCfg = await getCachedSettings();
+                    const invoiceNumber = `${order_number}-${Date.now().toString().slice(-4)}`;
+                    const callbackUrl = `${req.protocol}://${req.get('host')}/api/payment/paystation/callback`;
+                    
+                    const payResult = await initiatePayment({
+                        invoiceNumber,
+                        amount: total_amount,
+                        customerName: customer_name,
+                        customerPhone: customer_phone,
+                        customerEmail: customer_email,
+                        customerAddress: shipping_address,
+                        callbackUrl,
+                        reference: order_number,
+                        checkoutItems: items.map(i => i.name).slice(0, 3).join(', ')
+                    }, siteCfg);
+
+                    if (payResult.success && payResult.paymentUrl) {
+                        return res.json({
+                            success: true,
+                            orderId: result.insertId,
+                            orderNumber: order_number,
+                            totalAmount: total_amount,
+                            paymentMethod: 'paystation',
+                            paymentUrl: payResult.paymentUrl,
+                            accountCreated,
+                            tempPassword,
+                            userEmail,
+                            message: 'Order initiated, redirecting to PayStation...'
+                        });
+                    }
+
+                    console.error('[PayStation] Initiate failed:', payResult.error);
+                    return res.status(502).json({
+                        error: payResult.error || 'Failed to initialize PayStation gateway. Please try Cash on Delivery.',
+                        orderNumber: order_number
+                    });
+                } catch (e) {
+                    console.error('[PayStation] Initiate unexpected error:', e);
+                    return res.status(500).json({ error: 'PayStation gateway error: ' + e.message });
+                }
+            })();
+            return;
+        }
+
         res.json({
             success: true,
             orderId: result.insertId,
             orderNumber: order_number,
             totalAmount: total_amount,
+            accountCreated,
+            tempPassword,
+            userEmail,
             message: 'Order placed successfully!'
         });
+    });
+});
+
+
+// Public Order Tracking by Order Number or Phone Number
+app.get('/api/public/orders-track', (req, res) => {
+    let orderNumber = (req.query.orderNumber || req.query.order || req.query.q || req.query.search || '').toString().trim();
+    let phone = (req.query.phone || '').toString().trim();
+
+    // Auto-detect if user entered phone number into the orderNumber param
+    if (orderNumber && !phone) {
+        const digitsOnly = orderNumber.replace(/\D/g, '');
+        if (!orderNumber.toUpperCase().startsWith('ORD-') && digitsOnly.length >= 10) {
+            phone = orderNumber;
+            orderNumber = '';
+        }
+    }
+
+    if (!orderNumber && !phone) {
+        return res.status(400).json({ error: 'Please enter your Order Number or Mobile Number' });
+    }
+
+    let query = '';
+    let params = [];
+
+    if (orderNumber) {
+        query = 'SELECT * FROM orders WHERE order_number = ? OR order_number LIKE ? ORDER BY id DESC LIMIT 5';
+        params = [orderNumber, `%${orderNumber}%`];
+    } else {
+        const digits = phone.replace(/\D/g, '');
+        // Last 10 digits handles BD numbers formatted as +8801..., 8801..., or 01...
+        const matchDigits = digits.length >= 10 ? digits.slice(-10) : digits;
+        query = 'SELECT * FROM orders WHERE customer_phone LIKE ? ORDER BY id DESC LIMIT 15';
+        params = [`%${matchDigits}%`];
+    }
+
+    db.query(query, params, (err, results) => {
+        if (err || !results || results.length === 0) {
+            return res.status(404).json({ error: 'No orders found for this information. Please verify your order number or phone number.' });
+        }
+
+        const formatted = results.map(o => {
+            let items = [];
+            try { items = JSON.parse(o.items_json); } catch (e) {}
+            return {
+                id: o.id,
+                order_number: o.order_number,
+                customer_name: o.customer_name,
+                customer_phone: o.customer_phone,
+                shipping_address: o.shipping_address,
+                city: o.city,
+                delivery_zone: o.delivery_zone,
+                payment_method: o.payment_method,
+                payment_status: o.payment_status,
+                order_status: o.order_status,
+                transaction_id: o.transaction_id,
+                subtotal: o.subtotal,
+                shipping_fee: o.shipping_fee,
+                total_amount: o.total_amount,
+                items,
+                created_at: o.created_at,
+                updated_at: o.updated_at
+            };
+        });
+
+        res.json({
+            success: true,
+            orders: formatted
+        });
+    });
+});
+
+// Customer My Orders
+app.get('/api/user/my-orders', (req, res) => {
+    if (!req.session || !req.session.userSession) {
+        return res.status(401).json({ error: 'Please log in to view your orders' });
+    }
+
+    const user = req.session.userSession;
+    const query = 'SELECT * FROM orders WHERE user_id = ? OR customer_email = ? ORDER BY id DESC';
+    db.query(query, [user.id, user.email], (err, results) => {
+        if (err) return res.status(500).json({ error: 'Failed to fetch orders' });
+        const orders = (results || []).map(o => {
+            let items = [];
+            try { items = JSON.parse(o.items_json); } catch (e) {}
+            return {
+                id: o.id,
+                order_number: o.order_number,
+                customer_name: o.customer_name,
+                customer_phone: o.customer_phone,
+                shipping_address: o.shipping_address,
+                city: o.city,
+                payment_method: o.payment_method,
+                payment_status: o.payment_status,
+                order_status: o.order_status,
+                transaction_id: o.transaction_id,
+                total_amount: o.total_amount,
+                items,
+                created_at: o.created_at
+            };
+        });
+        res.json({ orders });
     });
 });
 
@@ -2407,6 +2627,170 @@ app.post('/api/admin/tracking/test-meta', requireAuth, async (req, res) => {
     }
 });
 
+
+// ==================== PAYSTATION PAYMENT GATEWAY ====================
+
+// PayStation Payment Callback / IPN Handler
+app.all('/api/payment/paystation/callback', async (req, res) => {
+    try {
+        const query = req.query || {};
+        const body = req.body || {};
+
+        const status = (query.status || body.status || '').toString().trim();
+        const invoiceNumber = (query.invoice_number || body.invoice_number || '').toString().trim();
+        const trxId = (query.trx_id || body.trx_id || '').toString().trim();
+
+        console.log(`[PayStation Callback] Received: status=${status}, invoice=${invoiceNumber}, trxId=${trxId}`);
+
+        if (!invoiceNumber) {
+            return res.redirect('/checkout?payment_status=failed&error=missing_invoice');
+        }
+
+        // Extract order number from invoice_number (e.g. "ORD-261024-5432-8921" => "ORD-261024-5432")
+        let orderNumber = invoiceNumber;
+        if (invoiceNumber.startsWith('ORD-')) {
+            const parts = invoiceNumber.split('-');
+            if (parts.length >= 3) {
+                orderNumber = `${parts[0]}-${parts[1]}-${parts[2]}`;
+            }
+        }
+
+        // Verify transaction server-to-server with PayStation
+        const siteCfg = await getCachedSettings();
+        const verifyResult = await verifyPayment({ invoiceNumber, trxId }, siteCfg);
+
+        console.log('[PayStation Verification Result]:', verifyResult);
+
+        const isVerifiedSuccessful = verifyResult.verified || 
+            (verifyResult.success && (verifyResult.status || '').toLowerCase() === 'successful') ||
+            (status.toLowerCase() === 'successful');
+
+        if (isVerifiedSuccessful) {
+            const finalTrxId = verifyResult.trxId || trxId || `PS-${Date.now()}`;
+            const detailsJson = JSON.stringify(verifyResult.data || { status, invoiceNumber, trxId });
+
+            db.query(
+                `UPDATE orders 
+                 SET payment_status = 'paid', 
+                     order_status = 'confirmed', 
+                     transaction_id = ?, 
+                     payment_details = ? 
+                 WHERE order_number = ?`,
+                [finalTrxId, detailsJson, orderNumber],
+                (updateErr) => {
+                    if (updateErr) console.error('[PayStation DB Update Error]:', updateErr);
+                }
+            );
+
+            // Server-Side Meta CAPI Purchase Dispatch
+            db.query('SELECT * FROM orders WHERE order_number = ?', [orderNumber], (err, orderRows) => {
+                if (!err && orderRows && orderRows.length > 0) {
+                    const order = orderRows[0];
+                    let orderItems = [];
+                    try { orderItems = JSON.parse(order.items_json); } catch (e) {}
+
+                    if (siteCfg.meta_pixel_enabled === 'true' && siteCfg.meta_pixel_id && siteCfg.meta_capi_token) {
+                        const clientIp = getClientIp(req);
+                        const cookies = parseCookies(req);
+                        const fbp = cookies._fbp || null;
+                        const fbc = cookies._fbc || null;
+
+                        const userData = buildUserData({
+                            ip: clientIp,
+                            userAgent: req.headers['user-agent'] || '',
+                            fbp,
+                            fbc,
+                            email: order.customer_email,
+                            phone: order.customer_phone,
+                            firstName: order.customer_name,
+                            city: order.city
+                        });
+
+                        sendMetaCapiEvent({
+                            pixelId: siteCfg.meta_pixel_id,
+                            accessToken: siteCfg.meta_capi_token,
+                            testEventCode: siteCfg.meta_test_event_code || null,
+                            eventName: 'Purchase',
+                            eventId: `purchase_${order.order_number}`,
+                            url: `${req.protocol}://${req.get('host')}/checkout`,
+                            userData,
+                            customData: {
+                                value: parseFloat(order.total_amount),
+                                currency: 'BDT',
+                                content_type: 'product',
+                                content_ids: orderItems.map(i => String(i.product_id || i.id)),
+                                num_items: orderItems.reduce((acc, i) => acc + (parseInt(i.quantity) || 1), 0),
+                                order_id: order.order_number,
+                                payment_method: 'paystation'
+                            }
+                        }).catch(e => console.error('[PayStation CAPI Purchase Error]:', e.message));
+                    }
+                }
+            });
+
+            return res.redirect(`/checkout?payment_status=success&orderNumber=${encodeURIComponent(orderNumber)}&trxId=${encodeURIComponent(finalTrxId)}`);
+        } else {
+            // Failed or cancelled payment
+            db.query(
+                `UPDATE orders 
+                 SET payment_status = 'failed' 
+                 WHERE order_number = ? AND payment_status = 'pending'`,
+                [orderNumber],
+                () => {}
+            );
+
+            return res.redirect(`/checkout?payment_status=failed&orderNumber=${encodeURIComponent(orderNumber)}&reason=${encodeURIComponent(verifyResult.error || status || 'Payment cancelled')}`);
+        }
+    } catch (err) {
+        console.error('[PayStation Callback Error]:', err);
+        return res.redirect('/checkout?payment_status=failed&error=server_error');
+    }
+});
+
+// Admin PayStation Gateway Test Connection
+app.post('/api/admin/tracking/test-paystation', requireAuth, async (req, res) => {
+    try {
+        const siteCfg = await getCachedSettings();
+        const testInvoice = `TEST-${Date.now()}`;
+        const callbackUrl = `${req.protocol}://${req.get('host')}/api/payment/paystation/callback`;
+        
+        const result = await initiatePayment({
+            invoiceNumber: testInvoice,
+            amount: 100,
+            customerName: 'Test Admin',
+            customerPhone: '01700000000',
+            customerEmail: 'admin@colorhutbd.xyz',
+            customerAddress: 'Dhaka, Bangladesh',
+            callbackUrl,
+            reference: 'AdminTest',
+            checkoutItems: 'Test Gateway Connection'
+        }, siteCfg);
+
+        const config = getPaystationConfig(siteCfg);
+
+        if (result.success) {
+            res.json({
+                success: true,
+                environment: config.environment,
+                isSandbox: config.isSandbox,
+                baseUrl: config.baseUrl,
+                merchantId: config.merchantId,
+                paymentUrl: result.paymentUrl,
+                message: `Connected to PayStation (${config.environment.toUpperCase()}) successfully!`
+            });
+        } else {
+            res.status(400).json({
+                success: false,
+                environment: config.environment,
+                isSandbox: config.isSandbox,
+                error: result.error || 'Failed to initialize test payment link'
+            });
+        }
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
+});
+
 app.get('/api/admin/robots', requireAuth, (req, res) => {
     fs.readFile(path.join(__dirname, 'robots.txt'), 'utf8', (err, data) => {
         if (err) return res.status(500).json({ error: 'Failed to read robots.txt' });
@@ -2525,7 +2909,10 @@ app.get('/api/public/config', async (req, res) => {
             demo_video_url: config.demo_video_url || '',
             demo_videos: config.demo_videos || '[]',
             delivery_inside_dhaka: config.delivery_inside_dhaka !== undefined && config.delivery_inside_dhaka !== '' ? Number(config.delivery_inside_dhaka) : 70,
-            delivery_outside_dhaka: config.delivery_outside_dhaka !== undefined && config.delivery_outside_dhaka !== '' ? Number(config.delivery_outside_dhaka) : 130
+            delivery_outside_dhaka: config.delivery_outside_dhaka !== undefined && config.delivery_outside_dhaka !== '' ? Number(config.delivery_outside_dhaka) : 130,
+            paystation_enabled: true,
+            paystation_is_sandbox: getPaystationConfig(config).isSandbox,
+            paystation_env: getPaystationConfig(config).environment
         });
     } catch (err) {
         res.status(500).json({});

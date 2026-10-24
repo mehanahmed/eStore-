@@ -362,10 +362,7 @@ export default function ProductMenuPage() {
         <section className="bg-gradient-to-b from-rose-50/60 via-amber-50/30 to-white border-b border-slate-100 py-10 md:py-14">
           <div className="max-w-7xl mx-auto px-4 md:px-8">
             <div className="max-w-3xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-rose-100/90 border border-rose-200/90 text-rose-700 text-xs font-black uppercase tracking-wider mb-4">
-                <Flame className="w-3.5 h-3.5 fill-rose-600 text-rose-600" />
-                <span>Hot Deals & Special Offers</span>
-              </div>
+              
               
               <h1 className="text-3xl sm:text-4xl md:text-5xl font-black text-slate-900 tracking-tight leading-tight">
                 Hot Deals & Selected Offers

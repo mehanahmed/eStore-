@@ -79,6 +79,7 @@ const SUB_NAV = [
     { label: 'Exterior', href: '/exterior/', icon: null },
     { label: 'Management', href: '/management/', icon: null },
     { label: 'Demo', href: '/demo/', icon: 'play' as const },
+    { label: 'Track Order', href: '/track/', icon: null },
 ];
 
 // ===  PROPS ===

@@ -13,22 +13,11 @@ import {
   ShieldCheck,
   Zap,
   Globe,
-  Play,
   RotateCw,
   ShoppingBag,
   ShoppingCart,
-  CreditCard,
-  FileCheck2,
-  Layers
+  CreditCard
 } from 'lucide-react';
-
-interface EventTestStatus {
-  status: 'idle' | 'sending' | 'success' | 'error';
-  eventId?: string;
-  traceId?: string;
-  error?: string;
-  timestamp?: string;
-}
 
 export default function AdminSettingsPage() {
   const [isLoading, setIsLoading] = useState(true);
@@ -50,15 +39,15 @@ export default function AdminSettingsPage() {
   const [accessToken, setAccessToken] = useState('');
   const [isSavingMeta, setIsSavingMeta] = useState(false);
 
-  // Event Testing Console States
-  const [isTestingAll, setIsTestingAll] = useState(false);
-  const [eventStatuses, setEventStatuses] = useState<Record<string, EventTestStatus>>({
-    PageView: { status: 'idle' },
-    ViewContent: { status: 'idle' },
-    AddToCart: { status: 'idle' },
-    InitiateCheckout: { status: 'idle' },
-    Purchase: { status: 'idle' }
-  });
+  // PayStation Payment Gateway Form State
+  const [paystationEnabled, setPaystationEnabled] = useState(true);
+  const [paystationEnv, setPaystationEnv] = useState<'sandbox' | 'live'>('sandbox');
+  const [paystationMerchantId, setPaystationMerchantId] = useState('');
+  const [paystationPassword, setPaystationPassword] = useState('');
+  const [showPaystationPassword, setShowPaystationPassword] = useState(false);
+  const [isSavingPaystation, setIsSavingPaystation] = useState(false);
+  const [isTestingPaystation, setIsTestingPaystation] = useState(false);
+  const [paystationTestResult, setPaystationTestResult] = useState<{ success?: boolean; message?: string; url?: string } | null>(null);
 
   const showNotification = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -79,6 +68,11 @@ export default function AdminSettingsPage() {
           setPixelId(data.meta_pixel_id || '');
           setTestEventCode(data.meta_test_event_code || '');
           setAccessToken(data.meta_capi_token || '');
+
+          setPaystationEnabled(data.paystation_enabled !== 'false');
+          setPaystationEnv(data.paystation_env === 'live' ? 'live' : 'sandbox');
+          setPaystationMerchantId(data.paystation_merchant_id || '');
+          setPaystationPassword(data.paystation_password || '');
         } else if (res.status === 401) {
           showNotification('Admin session not detected. Please log in to view and save settings.', 'error');
         } else {
@@ -159,173 +153,65 @@ export default function AdminSettingsPage() {
     }
   };
 
-  // Dispatch a single test event (both Browser Pixel and Server CAPI with identical event_id)
-  const fireSingleEvent = async (eventName: string): Promise<boolean> => {
-    if (!pixelId || !accessToken) {
-      showNotification('Please enter Pixel ID and Access Token first.', 'error');
-      return false;
-    }
-
-    const eventId = `test_${eventName.toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    const nowStr = new Date().toLocaleTimeString();
-
-    // 1. Build realistic sample payload
-    let customData: Record<string, any> = {};
-    if (eventName === 'PageView') {
-      customData = { page_title: 'Color Hut EStore Test Console' };
-    } else if (eventName === 'ViewContent') {
-      customData = {
-        content_name: 'NeoFlex 500৳',
-        content_ids: ['17'],
-        content_type: 'product',
-        value: 500,
-        currency: 'BDT'
-      };
-    } else if (eventName === 'AddToCart') {
-      customData = {
-        content_name: 'NeoFlex 500৳',
-        content_ids: ['17'],
-        content_type: 'product',
-        value: 500,
-        currency: 'BDT',
-        num_items: 1
-      };
-    } else if (eventName === 'InitiateCheckout') {
-      customData = {
-        content_ids: ['17'],
-        content_type: 'product',
-        num_items: 1,
-        value: 570,
-        currency: 'BDT'
-      };
-    } else if (eventName === 'Purchase') {
-      customData = {
-        content_ids: ['17'],
-        content_type: 'product',
-        num_items: 1,
-        value: 570,
-        currency: 'BDT',
-        order_id: `ORD-TEST-${Math.floor(1000 + Math.random() * 9000)}`
-      };
-    }
-
-    // 2. Fire Browser Pixel if available (so Meta Events Manager marks it as Deduplicated!)
-    if (typeof (window as any).fbq === 'function') {
-      try {
-        (window as any).fbq('track', eventName, customData, { eventID: eventId });
-      } catch (e) {}
-    }
-
-    // Set sending state
-    setEventStatuses(prev => ({
-      ...prev,
-      [eventName]: { status: 'sending', eventId, timestamp: nowStr }
-    }));
-
-    // 3. Fire Server-Side CAPI
+  // Save PayStation Settings
+  const handleSavePaystation = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingPaystation(true);
     try {
-      const res = await fetch('/api/admin/tracking/test-meta', {
+      const res = await fetch('/api/admin/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pixel_id: pixelId.trim(),
-          access_token: accessToken.trim(),
-          test_event_code: testEventCode.trim(),
-          event_name: eventName,
-          event_id: eventId,
-          custom_data: customData,
-          user_data: {
-            email: 'test@colorhutbd.xyz',
-            phone: '8801919760626',
-            firstName: 'ColorHut',
-            city: 'Dhaka'
-          }
+          paystation_enabled: paystationEnabled ? 'true' : 'false',
+          paystation_env: paystationEnv,
+          paystation_merchant_id: paystationMerchantId.trim(),
+          paystation_password: paystationPassword.trim()
         })
       });
 
-      const contentType = res.headers.get('content-type') || '';
-      let data: any = {};
-      if (contentType.includes('application/json')) {
-        data = await res.json();
+      if (res.ok) {
+        showNotification('PayStation settings saved successfully!');
       } else {
-        const text = await res.text();
-        throw new Error(`Server returned non-JSON (${res.status}). Server might need restart.`);
-      }
-
-      if (res.ok && data.success) {
-        const traceId = data.response?.fbtrace_id || 'OK';
-        setEventStatuses(prev => ({
-          ...prev,
-          [eventName]: { status: 'success', eventId, traceId, timestamp: nowStr }
-        }));
-        return true;
-      } else {
-        const errMsg = data.error?.message || data.error || 'Meta returned error';
-        setEventStatuses(prev => ({
-          ...prev,
-          [eventName]: { status: 'error', eventId, error: String(errMsg), timestamp: nowStr }
-        }));
-        return false;
+        showNotification('Failed to save PayStation settings.', 'error');
       }
     } catch (err: any) {
-      setEventStatuses(prev => ({
-        ...prev,
-        [eventName]: { status: 'error', eventId, error: err.message || 'Network error', timestamp: nowStr }
-      }));
-      return false;
+      showNotification('Network error while saving PayStation settings.', 'error');
+    } finally {
+      setIsSavingPaystation(false);
     }
   };
 
-  // Run all 5 events in sequence
-  const handleTestAllEvents = async () => {
-    if (!pixelId || !accessToken) {
-      showNotification('Please enter Pixel ID and Access Token first.', 'error');
-      return;
-    }
-
-    setIsTestingAll(true);
-    const eventsToRun = ['PageView', 'ViewContent', 'AddToCart', 'InitiateCheckout', 'Purchase'];
-    
-    for (const evt of eventsToRun) {
-      await fireSingleEvent(evt);
-      // Brief 600ms pause between events so Meta receives them in clean chronological sequence
-      await new Promise(r => setTimeout(r, 600));
-    }
-    
-    setIsTestingAll(false);
-    showNotification('All 5 test events dispatched! Check your Meta Events Manager "Test events" tab.');
-  };
-
-  const eventMetadata: Record<string, { label: string; desc: string; icon: any; color: string }> = {
-    PageView: {
-      label: 'Page View',
-      desc: 'All products & page visits',
-      icon: Layers,
-      color: 'text-blue-500 bg-blue-50 border-blue-200'
-    },
-    ViewContent: {
-      label: 'View Content',
-      desc: 'Viewing product detail page',
-      icon: Eye,
-      color: 'text-indigo-500 bg-indigo-50 border-indigo-200'
-    },
-    AddToCart: {
-      label: 'Add to Cart',
-      desc: 'Customer clicks Buy / Cart',
-      icon: ShoppingCart,
-      color: 'text-amber-500 bg-amber-50 border-amber-200'
-    },
-    InitiateCheckout: {
-      label: 'Initiate Checkout',
-      desc: 'Checkout page / form opened',
-      icon: CreditCard,
-      color: 'text-purple-500 bg-purple-50 border-purple-200'
-    },
-    Purchase: {
-      label: 'Purchase (Order Confirmed)',
-      desc: 'Order placed & confirmed in DB',
-      icon: FileCheck2,
-      color: 'text-emerald-500 bg-emerald-50 border-emerald-200'
+  // Test PayStation Gateway Connection
+  const handleTestPaystation = async () => {
+    setIsTestingPaystation(true);
+    setPaystationTestResult(null);
+    try {
+      const res = await fetch('/api/admin/tracking/test-paystation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setPaystationTestResult({
+          success: true,
+          message: data.message || 'Connected to PayStation successfully!',
+          url: data.paymentUrl
+        });
+        showNotification(`PayStation (${data.environment?.toUpperCase()}) test link created successfully!`);
+      } else {
+        setPaystationTestResult({
+          success: false,
+          message: data.error || 'Failed to connect to PayStation'
+        });
+        showNotification(data.error || 'PayStation connection failed', 'error');
+      }
+    } catch (err: any) {
+      setPaystationTestResult({
+        success: false,
+        message: err.message || 'Network error connecting to PayStation'
+      });
+    } finally {
+      setIsTestingPaystation(false);
     }
   };
 
@@ -558,129 +444,205 @@ export default function AdminSettingsPage() {
                 </form>
               </div>
 
-              {/* CARD 3: LIVE EVENT TESTING CONSOLE (ALL 5 EVENTS) */}
+              {/* CARD: PAYSTATION PAYMENT GATEWAY */}
               <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 sm:p-8">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <Zap className="w-5 h-5 text-orange-500 fill-orange-500" />
-                      <h3 className="text-base font-bold text-slate-900 leading-tight">
-                        Meta Events Testing Console
-                      </h3>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shrink-0">
+                      <CreditCard className="w-5 h-5" />
                     </div>
-                    <p className="text-xs font-medium text-slate-500 mt-1">
-                      Test each of your 5 events live. Events appear immediately in your Meta Events Manager <strong>Test events</strong> tab with your test code ({testEventCode || 'TEST'}).
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-slate-900 leading-tight">
+                          PayStation Payment Gateway
+                        </h3>
+                        <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">
+                          Bangladesh Bank PSO
+                        </span>
+                      </div>
+                      <p className="text-xs font-medium text-slate-500 mt-0.5">
+                        Accept bKash, Nagad, Rocket, Visa, Mastercard & Internet Banking directly.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Enable / Disable Switch */}
+                  <label className="relative inline-flex items-center cursor-pointer shrink-0">
+                    <input 
+                      type="checkbox" 
+                      checked={paystationEnabled}
+                      onChange={(e) => setPaystationEnabled(e.target.checked)}
+                      className="sr-only peer"
+                    />
+                    <div className="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500" />
+                    <span className="ml-3 text-xs font-bold text-slate-700">
+                      {paystationEnabled ? 'Active' : 'Disabled'}
+                    </span>
+                  </label>
+                </div>
+
+                <form onSubmit={handleSavePaystation} className="pt-6 space-y-5">
+                  {/* Environment Selector: Sandbox vs Live */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Gateway Environment
+                    </label>
+                    <div className="grid grid-cols-2 gap-3 max-w-md">
+                      <button
+                        type="button"
+                        onClick={() => setPaystationEnv('sandbox')}
+                        className={`py-2.5 px-4 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                          paystationEnv === 'sandbox'
+                            ? 'bg-amber-50 border-amber-300 text-amber-800 ring-2 ring-amber-400/20'
+                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-amber-500" />
+                        <span>Sandbox (Testing)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPaystationEnv('live')}
+                        className={`py-2.5 px-4 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                          paystationEnv === 'live'
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-800 ring-2 ring-emerald-400/20'
+                            : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-white'
+                        }`}
+                      >
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                        <span>Live (Production)</span>
+                      </button>
+                    </div>
+                    <p className="text-[11px] font-medium text-slate-400 mt-1.5">
+                      {paystationEnv === 'sandbox'
+                        ? 'Sandbox uses test endpoint (https://sandbox.paystation.com.bd) with dummy bKash/Cards.'
+                        : 'Live uses production endpoint (https://api.paystation.com.bd) for real customer payments.'}
                     </p>
                   </div>
 
-                  <button
-                    type="button"
-                    onClick={handleTestAllEvents}
-                    disabled={isTestingAll || !pixelId || !accessToken}
-                    className="px-5 py-3 rounded-xl bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs tracking-wider uppercase transition-all shadow-md shadow-orange-500/20 flex items-center justify-center gap-2 disabled:opacity-50 shrink-0"
-                  >
-                    {isTestingAll ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Sending All Events...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4 fill-white" />
-                        <span>Test All 5 Events</span>
-                      </>
-                    )}
-                  </button>
-                </div>
+                  {/* Merchant ID Input */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      Merchant ID
+                    </label>
+                    <input 
+                      type="text" 
+                      value={paystationMerchantId}
+                      onChange={(e) => setPaystationMerchantId(e.target.value)}
+                      placeholder={paystationEnv === 'sandbox' ? '104-1653730183 (Default Sandbox ID)' : 'Enter your Production Merchant ID'}
+                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-all"
+                    />
+                    <p className="text-[11px] font-medium text-slate-400 mt-1">
+                      Can also be set in <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">.env</code> as <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">PAYSTATION_MERCHANT_ID</code>
+                    </p>
+                  </div>
 
-                {/* Individual Event Triggers Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5 pt-6">
-                  {Object.entries(eventMetadata).map(([key, meta]) => {
-                    const status = eventStatuses[key] || { status: 'idle' };
-                    const Icon = meta.icon;
-
-                    return (
-                      <div 
-                        key={key}
-                        className="p-4 rounded-2xl border border-slate-200/90 bg-slate-50/50 hover:bg-white hover:border-slate-300 transition-all flex flex-col justify-between"
+                  {/* Password / Secret Key Input */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-bold text-slate-700">
+                        Password / Secret Key
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setShowPaystationPassword(!showPaystationPassword)}
+                        className="text-[11px] font-bold text-slate-400 hover:text-slate-700 flex items-center gap-1 transition-colors"
                       >
-                        <div>
-                          <div className="flex items-start justify-between gap-2 mb-2">
-                            <div className="flex items-center gap-2.5">
-                              <div className={`w-8 h-8 rounded-xl flex items-center justify-center border ${meta.color} shrink-0`}>
-                                <Icon className="w-4 h-4" />
-                              </div>
-                              <div>
-                                <h4 className="text-xs font-bold text-slate-900">{meta.label}</h4>
-                                <span className="font-mono text-[10px] text-slate-400 font-semibold">{key}</span>
-                              </div>
-                            </div>
+                        {showPaystationPassword ? (
+                          <>
+                            <EyeOff className="w-3.5 h-3.5" />
+                            Hide
+                          </>
+                        ) : (
+                          <>
+                            <Eye className="w-3.5 h-3.5" />
+                            Show
+                          </>
+                        )}
+                      </button>
+                    </div>
+                    <input 
+                      type={showPaystationPassword ? 'text' : 'password'} 
+                      value={paystationPassword}
+                      onChange={(e) => setPaystationPassword(e.target.value)}
+                      placeholder={paystationEnv === 'sandbox' ? 'gamecoderstorepass (Default Sandbox Password)' : 'Enter your Production Password'}
+                      className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm font-mono text-slate-900 placeholder:text-slate-400 focus:outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 transition-all"
+                    />
+                    <p className="text-[11px] font-medium text-slate-400 mt-1">
+                      Can also be set in <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">.env</code> as <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700">PAYSTATION_PASSWORD</code>
+                    </p>
+                  </div>
 
-                            {status.status === 'success' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full">
-                                <Check className="w-3 h-3 stroke-[3]" />
-                                Sent
-                              </span>
-                            )}
-                            {status.status === 'error' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-rose-700 bg-rose-100 px-2 py-0.5 rounded-full">
-                                Failed
-                              </span>
-                            )}
-                            {status.status === 'sending' && (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-bold text-orange-700 bg-orange-100 px-2 py-0.5 rounded-full">
-                                <Loader2 className="w-3 h-3 animate-spin" />
-                                Sending
-                              </span>
-                            )}
-                          </div>
-                          
-                          <p className="text-[11px] text-slate-500 font-medium mb-3">
-                            {meta.desc}
-                          </p>
-                        </div>
-
-                        <div>
-                          {status.traceId && (
-                            <div className="text-[10px] font-mono text-slate-400 truncate mb-2">
-                              trace: {status.traceId}
-                            </div>
-                          )}
-                          {status.error && (
-                            <div className="text-[10px] text-rose-600 truncate mb-2" title={status.error}>
-                              {status.error}
-                            </div>
-                          )}
-
-                          <button
-                            type="button"
-                            onClick={() => fireSingleEvent(key)}
-                            disabled={status.status === 'sending' || isTestingAll || !pixelId || !accessToken}
-                            className="w-full py-2 px-3 rounded-lg bg-white border border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-800 font-bold text-xs transition-all flex items-center justify-center gap-1.5 shadow-2xs disabled:opacity-50"
-                          >
-                            <Send className="w-3 h-3 text-slate-500" />
-                            <span>Send {key}</span>
-                          </button>
-                        </div>
+                  {/* Test Connection Banner if run */}
+                  {paystationTestResult && (
+                    <div className={`p-4 rounded-2xl border text-xs font-medium ${
+                      paystationTestResult.success
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                        : 'bg-red-50 border-red-200 text-red-800'
+                    }`}>
+                      <div className="flex items-center gap-2 font-bold mb-1">
+                        {paystationTestResult.success ? (
+                          <Check className="w-4 h-4 text-emerald-600" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-red-600" />
+                        )}
+                        <span>{paystationTestResult.message}</span>
                       </div>
-                    );
-                  })}
-                </div>
-              </div>
+                      {paystationTestResult.url && (
+                        <div className="mt-2 pt-2 border-t border-emerald-200 flex items-center justify-between gap-3">
+                          <span className="truncate text-[11px] font-mono text-emerald-700">
+                            {paystationTestResult.url}
+                          </span>
+                          <a
+                            href={paystationTestResult.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="px-3 py-1 bg-emerald-600 text-white rounded-lg font-bold text-[11px] shrink-0 hover:bg-emerald-700"
+                          >
+                            Open Test Link
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
-              {/* Deduplication & Tracking Quality Info Banner */}
-              <div className="p-5 rounded-2xl bg-gradient-to-r from-orange-50/70 to-amber-50/50 border border-orange-200/70 flex items-start gap-4">
-                <div className="w-9 h-9 rounded-xl bg-orange-500/15 text-orange-600 flex items-center justify-center shrink-0 mt-0.5">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div className="text-xs text-slate-600 space-y-1">
-                  <p className="font-bold text-slate-900">
-                    Dual Frontend + Server-Side CAPI Deduplication Active
-                  </p>
-                  <p className="leading-relaxed">
-                    Browser Pixel events and Server-Side CAPI payloads share the exact same <code className="bg-white/80 px-1 py-0.5 rounded border border-orange-200/80 font-mono text-[11px] text-orange-800">event_id</code> (e.g. <code className="bg-white/80 px-1 py-0.5 rounded border border-orange-200/80 font-mono text-[11px] text-orange-800">purchase_ORD-...</code>). Meta automatically deduplicates twin events so your Ads Manager never double-counts sales or ad spend.
-                  </p>
-                </div>
+                  {/* Action Buttons: Save & Test Connection */}
+                  <div className="pt-2 flex flex-col sm:flex-row gap-3">
+                    <button
+                      type="submit"
+                      disabled={isSavingPaystation}
+                      className="flex-1 bg-[#0D1527] hover:bg-[#1E293B] text-white py-3.5 rounded-xl font-bold text-xs tracking-wider uppercase transition-all shadow-xs flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      {isSavingPaystation ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        'Save PayStation Settings'
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handleTestPaystation}
+                      disabled={isTestingPaystation}
+                      className="px-6 py-3.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl font-bold text-xs tracking-wider uppercase transition-all shadow-md shadow-indigo-500/20 flex items-center justify-center gap-2 disabled:opacity-50 shrink-0"
+                    >
+                      {isTestingPaystation ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Testing...
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-4 h-4" />
+                          Test Connection
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
