@@ -59,54 +59,6 @@ export default function OrdersAdminPage() {
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
 
-  // Delivery Charges Setting State
-  const [deliveryCharges, setDeliveryCharges] = useState({
-    inside_dhaka: 70,
-    outside_dhaka: 130
-  });
-  const [savingDelivery, setSavingDelivery] = useState(false);
-  const [deliverySaved, setDeliverySaved] = useState(false);
-
-  const fetchDeliverySettings = async () => {
-    try {
-      const res = await fetch('/api/admin/settings');
-      if (res.ok) {
-        const data = await res.json();
-        setDeliveryCharges({
-          inside_dhaka: data.delivery_inside_dhaka !== undefined && data.delivery_inside_dhaka !== '' ? Number(data.delivery_inside_dhaka) : 70,
-          outside_dhaka: data.delivery_outside_dhaka !== undefined && data.delivery_outside_dhaka !== '' ? Number(data.delivery_outside_dhaka) : 130
-        });
-      }
-    } catch (e) {
-      console.error('Failed to load delivery settings:', e);
-    }
-  };
-
-  const handleSaveDelivery = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSavingDelivery(true);
-    try {
-      const res = await fetch('/api/admin/settings', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          delivery_inside_dhaka: String(deliveryCharges.inside_dhaka),
-          delivery_outside_dhaka: String(deliveryCharges.outside_dhaka)
-        })
-      });
-      if (res.ok) {
-        setDeliverySaved(true);
-        setTimeout(() => setDeliverySaved(false), 1500);
-      } else {
-        alert('Failed to save delivery charges');
-      }
-    } catch (err) {
-      alert('Error saving delivery charges');
-    } finally {
-      setSavingDelivery(false);
-    }
-  };
-
   const [stats, setStats] = useState({
     total_count: 0,
     total_sales: 0,
@@ -136,7 +88,6 @@ export default function OrdersAdminPage() {
 
   useEffect(() => {
     fetchOrders();
-    fetchDeliverySettings();
   }, [statusFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
@@ -237,72 +188,6 @@ export default function OrdersAdminPage() {
               <p className="text-2xl font-black text-emerald-600 mt-1">
                 {stats.delivered_count || 0}
               </p>
-            </div>
-          </div>
-
-          {/* Delivery Charges Settings */}
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-4 sm:p-5">
-            <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-              <div className="flex items-center gap-3 lg:w-64 shrink-0">
-                <div className="w-11 h-11 rounded-2xl bg-orange-50 border border-orange-100 flex items-center justify-center shrink-0">
-                  <Truck className="w-5 h-5 text-orange-600" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-slate-900">Delivery Charges</h3>
-                  <p className="text-[11px] text-slate-400 font-medium">Auto-applied at checkout by zone</p>
-                </div>
-              </div>
-
-              <form onSubmit={handleSaveDelivery} className="flex flex-col sm:flex-row sm:items-end gap-3 flex-1 lg:justify-end">
-                <div className="w-full sm:w-44">
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Inside Dhaka
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={deliveryCharges.inside_dhaka}
-                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, inside_dhaka: Number(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-7 pr-3 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm transition-all"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <div className="w-full sm:w-44">
-                  <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-1">
-                    Outside Dhaka
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 font-bold text-slate-400 text-sm">৳</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={deliveryCharges.outside_dhaka}
-                      onChange={(e) => setDeliveryCharges({ ...deliveryCharges, outside_dhaka: Number(e.target.value) })}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl py-2 pl-7 pr-3 outline-none focus:border-orange-500 focus:bg-white text-slate-900 font-bold text-sm transition-all"
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={savingDelivery}
-                  className="flex items-center justify-center gap-2 h-[38px] px-5 rounded-xl bg-orange-600 hover:bg-orange-700 text-white text-xs font-bold shadow-md shadow-orange-500/20 disabled:opacity-50 transition-all shrink-0"
-                >
-                  {savingDelivery ? (
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  ) : deliverySaved ? (
-                    <Check className="w-3.5 h-3.5" />
-                  ) : (
-                    <Truck className="w-3.5 h-3.5" />
-                  )}
-                  <span>{deliverySaved ? 'Saved!' : savingDelivery ? 'Saving...' : 'Save Charges'}</span>
-                </button>
-              </form>
             </div>
           </div>
 

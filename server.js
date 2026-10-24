@@ -713,7 +713,8 @@ db.getConnection((err, connection) => {
                                                                                 "ALTER TABLE orders MODIFY COLUMN order_number VARCHAR(60) NOT NULL",
                                                                                 "ALTER TABLE orders MODIFY COLUMN customer_name VARCHAR(255) NOT NULL",
                                                                                 "ALTER TABLE orders MODIFY COLUMN customer_email VARCHAR(255) NULL",
-                                                                                "ALTER TABLE orders MODIFY COLUMN delivery_zone VARCHAR(100) DEFAULT 'inside_dhaka'"
+                                                                                "ALTER TABLE orders MODIFY COLUMN delivery_zone VARCHAR(100) DEFAULT 'inside_dhaka'",
+                                                                                "ALTER TABLE orders MODIFY COLUMN order_status ENUM('pending','confirmed','processing','shipped','delivered','cancelled','failed') DEFAULT 'pending'"
                                                                             ];
 
                                                                             safeOrderMigrations.forEach(q => {
@@ -1040,6 +1041,21 @@ app.get('/api/admin/dashboard-stats', requireAuth, (req, res) => {
         totalProducts: 'SELECT COUNT(*) as count FROM products WHERE is_deleted = FALSE',
         publishedProducts: 'SELECT COUNT(*) as count FROM products WHERE status = "Published" AND is_deleted = FALSE',
         unpublishedProducts: 'SELECT COUNT(*) as count FROM products WHERE status = "Draft" AND is_deleted = FALSE',
+        totalOrders: "SELECT COUNT(*) as count FROM orders WHERE payment_status != 'failed' AND order_status != 'failed'",
+        totalRevenue: "SELECT COALESCE(SUM(total_amount), 0) as total FROM orders WHERE payment_status = 'paid'",
+        paystationRevenue: "SELECT COALESCE(SUM(total_amount), 0) as total FROM orders WHERE payment_method = 'paystation' AND payment_status = 'paid'",
+        orderStatusCounts: `
+            SELECT 
+                COUNT(CASE WHEN order_status = 'pending' AND payment_status != 'failed' THEN 1 END) as pending,
+                COUNT(CASE WHEN order_status = 'confirmed' THEN 1 END) as confirmed,
+                COUNT(CASE WHEN order_status = 'processing' THEN 1 END) as processing,
+                COUNT(CASE WHEN order_status = 'shipped' THEN 1 END) as shipped,
+                COUNT(CASE WHEN order_status = 'delivered' THEN 1 END) as delivered,
+                COUNT(CASE WHEN order_status = 'cancelled' OR order_status = 'failed' THEN 1 END) as cancelled
+            FROM orders
+        `,
+        totalCustomers: 'SELECT COUNT(*) as count FROM users WHERE role = "user"',
+        totalMeetings: 'SELECT COUNT(*) as count FROM meeting_requests',
         recentProducts: `
             SELECT p.id, p.name, p.status, p.views, p.image, c.name as category_name 
             FROM products p 
@@ -1055,7 +1071,13 @@ app.get('/api/admin/dashboard-stats', requireAuth, (req, res) => {
             WHERE c.is_deleted = FALSE
             GROUP BY c.id
             ORDER BY product_count DESC
-            LIMIT 3
+            LIMIT 4
+        `,
+        recentOrders: `
+            SELECT id, order_number, customer_name, customer_phone, city, delivery_zone, total_amount, order_status, payment_status, payment_method, created_at 
+            FROM orders 
+            ORDER BY id DESC 
+            LIMIT 8
         `
     };
 
@@ -1075,12 +1097,19 @@ app.get('/api/admin/dashboard-stats', requireAuth, (req, res) => {
     Promise.all(promises)
         .then(() => {
             res.json({
-                totalCategories: results.totalCategories[0].count,
-                totalProducts: results.totalProducts[0].count,
-                publishedProducts: results.publishedProducts[0].count,
-                unpublishedProducts: results.unpublishedProducts[0].count,
-                recentProducts: results.recentProducts,
-                trendingCategories: results.trendingCategories
+                totalCategories: results.totalCategories[0]?.count || 0,
+                totalProducts: results.totalProducts[0]?.count || 0,
+                publishedProducts: results.publishedProducts[0]?.count || 0,
+                unpublishedProducts: results.unpublishedProducts[0]?.count || 0,
+                totalOrders: results.totalOrders[0]?.count || 0,
+                totalRevenue: Number(results.totalRevenue[0]?.total || 0),
+                paystationRevenue: Number(results.paystationRevenue[0]?.total || 0),
+                orderStatusCounts: results.orderStatusCounts[0] || { pending: 0, confirmed: 0, processing: 0, shipped: 0, delivered: 0, cancelled: 0 },
+                totalCustomers: results.totalCustomers[0]?.count || 0,
+                totalMeetings: results.totalMeetings[0]?.count || 0,
+                recentProducts: results.recentProducts || [],
+                trendingCategories: results.trendingCategories || [],
+                recentOrders: results.recentOrders || []
             });
         })
         .catch(err => {
@@ -1907,9 +1936,9 @@ app.get('/api/admin/orders', requireAuth, (req, res) => {
     const listQuery = `SELECT * FROM orders WHERE ${whereClause} ORDER BY created_at DESC`;
     const statsQuery = `
         SELECT 
-            COUNT(*) as total_count,
-            COALESCE(SUM(CASE WHEN order_status != 'cancelled' THEN total_amount ELSE 0 END), 0) as total_sales,
-            SUM(CASE WHEN order_status = 'pending' THEN 1 ELSE 0 END) as pending_count,
+            COUNT(CASE WHEN order_status NOT IN ('cancelled', 'failed') AND payment_status != 'failed' THEN 1 END) as total_count,
+            COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) as total_sales,
+            SUM(CASE WHEN order_status = 'pending' AND payment_status != 'failed' THEN 1 ELSE 0 END) as pending_count,
             SUM(CASE WHEN order_status = 'delivered' THEN 1 ELSE 0 END) as delivered_count
         FROM orders
     `;
@@ -1944,6 +1973,69 @@ app.get('/api/admin/orders', requireAuth, (req, res) => {
             });
         });
     });
+});
+
+// Admin Payments & Gateway Summary Endpoint
+app.get('/api/admin/payments-data', requireAuth, async (req, res) => {
+    try {
+        const siteCfg = await getCachedSettings();
+        const paystationConfig = getPaystationConfig(siteCfg);
+
+        const summaryQuery = `
+            SELECT 
+                COUNT(*) as total_orders,
+                COALESCE(SUM(CASE WHEN payment_status = 'paid' THEN total_amount ELSE 0 END), 0) as total_settled,
+                COALESCE(SUM(CASE WHEN payment_method = 'paystation' AND payment_status = 'paid' THEN total_amount ELSE 0 END), 0) as paystation_settled,
+                COALESCE(SUM(CASE WHEN payment_method = 'cod' THEN total_amount ELSE 0 END), 0) as cod_volume,
+                COALESCE(SUM(CASE WHEN payment_status = 'pending' THEN total_amount ELSE 0 END), 0) as pending_settlement,
+                COUNT(CASE WHEN payment_status = 'paid' THEN 1 END) as paid_count,
+                COUNT(CASE WHEN payment_status = 'failed' THEN 1 END) as failed_count
+            FROM orders
+        `;
+
+        const transactionsQuery = `
+            SELECT id, order_number, customer_name, customer_phone, payment_method, payment_status, transaction_id, total_amount, order_status, created_at
+            FROM orders
+            ORDER BY id DESC
+            LIMIT 50
+        `;
+
+        db.query(summaryQuery, (err, sumRows) => {
+            if (err) return res.status(500).json({ error: 'Failed to fetch summary' });
+
+            db.query(transactionsQuery, (tErr, txnRows) => {
+                if (tErr) return res.status(500).json({ error: 'Failed to fetch transactions' });
+
+                const summary = sumRows[0] || {};
+                const totalSettled = Number(summary.total_settled || 0);
+                const paystationSettled = Number(summary.paystation_settled || 0);
+                const pendingSettlement = Number(summary.pending_settlement || 0);
+                const totalOrders = Number(summary.total_orders || 0);
+                const paidCount = Number(summary.paid_count || 0);
+                const successRate = totalOrders > 0 ? ((paidCount / totalOrders) * 100).toFixed(1) : '100.0';
+
+                res.json({
+                    gateway: {
+                        name: 'PayStation',
+                        environment: paystationConfig.environment,
+                        isSandbox: paystationConfig.isSandbox,
+                        merchantId: paystationConfig.merchantId,
+                        status: 'Active'
+                    },
+                    metrics: {
+                        totalSettled,
+                        paystationSettled,
+                        pendingSettlement,
+                        totalOrders,
+                        successRate
+                    },
+                    transactions: txnRows || []
+                });
+            });
+        });
+    } catch (e) {
+        res.status(500).json({ error: e.message });
+    }
 });
 
 // 4. Admin Update Order Status
@@ -2733,8 +2825,9 @@ app.all('/api/payment/paystation/callback', async (req, res) => {
             // Failed or cancelled payment
             db.query(
                 `UPDATE orders 
-                 SET payment_status = 'failed' 
-                 WHERE order_number = ? AND payment_status = 'pending'`,
+                 SET payment_status = 'failed',
+                     order_status = 'failed' 
+                 WHERE order_number = ?`,
                 [orderNumber],
                 () => {}
             );
